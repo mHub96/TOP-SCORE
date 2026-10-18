@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>TOP SCORE · Neurosurgery Boards</title>
+  <meta name="description" content="Memorize every chapter of Top Score for the Neurosurgery Board Examination: spaced repetition, MCQ challenges, exam simulator and games — offline.">
+  <meta name="theme-color" content="#0b0a14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TOP SCORE">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="bg" aria-hidden="true"></canvas>
+  <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+
+  <header class="topbar">
+    <a href="#/" class="brand" aria-label="TOP SCORE home"><span class="logo">🧠</span><span><b>TOP</b> SCORE</span></a>
+    <div class="top-actions">
+      <a href="#/search" class="icon-btn" aria-label="Search questions">🔍</a>
+      <button class="icon-btn" id="themeBtn" aria-label="Toggle theme">🌓</button>
+      <a href="#/settings" class="icon-btn" aria-label="Settings and backup">⚙️</a>
+    </div>
+  </header>
+
+  <main id="view" class="view"></main>
+
+  <nav class="nav" aria-label="Main">
+    <a href="#/" data-r="home"><span>🏠</span>Home</a>
+    <a href="#/chapters" data-r="chapters"><span>📚</span>Chapters</a>
+    <a href="#/study" data-r="study"><span>🧠</span>Study</a>
+    <a href="#/games" data-r="games"><span>🎮</span>Games</a>
+    <a href="#/stats" data-r="stats"><span>📊</span>Stats</a>
+  </nav>
+  <div id="toasts" aria-live="polite"></div>
+
+  <noscript><p style="padding:2rem">TOP SCORE needs JavaScript enabled.</p></noscript>
+  <script src="js/data.js"></script>
+  <script src="js/fsrs.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/fx.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/modes.js"></script>
+</body>
+</html>

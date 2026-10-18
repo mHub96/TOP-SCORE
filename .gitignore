@@ -1,0 +1,5 @@
+# The source book is copyrighted (Thieme) — never commit it
+*.pdf
+.DS_Store
+Thumbs.db
+node_modules/
