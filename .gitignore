@@ -3,3 +3,7 @@
 .DS_Store
 Thumbs.db
 node_modules/
+# Greenberg explanation pack + its build data contain Greenberg text — keep local only
+*.tspack
+pack-build/
+Greenberg-Verification-Report.md

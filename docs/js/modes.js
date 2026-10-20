@@ -257,10 +257,12 @@
           <div class="fb-key">Book key: <b>${q.k}</b>${keyNote}</div>
           ${q.r ? `<div class="src">📖 ${esc(q.r)}</div>` : ''}
           ${q.x ? `<div class="note">ℹ️ ${esc(q.x)}</div>` : ''}
+          <div class="xp" id="xp"></div>
           ${cfg.fsrs ? `<div class="muted small">Next review: ${fmtIvl(S().cards[id].due - Date.now())}</div>` : ''}
           <button class="btn block" id="nextBtn">${over ? 'See results' : 'Next ›'}</button>
         </div>`;
       $('#nextBtn').onclick = () => over ? finish() : next();
+      Explain.mount($('#xp'), id, { open: !ok });
       $('#nextBtn').focus({ preventScroll: true });
       $('#fb').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
@@ -343,7 +345,7 @@
       if ($('#retryMiss')) $('#retryMiss').onclick = () => again(shuffle(missed));
       if ($('#retryAll')) $('#retryAll').onclick = () => again(cfg.ordered ? cfg.ids.slice() : shuffle(cfg.ids));
       if ($('#again')) $('#again').onclick = () => quiz(Object.assign({}, cfg, { ids: shuffle(cfg.ids) }));
-      $('#review').onclick = () => { $('#revList').innerHTML = reviewList(R.answers); $('#revList').scrollIntoView({ behavior: 'smooth' }); };
+      $('#review').onclick = () => { $('#revList').innerHTML = reviewList(R.answers); Explain.scan($('#revList')); $('#revList').scrollIntoView({ behavior: 'smooth' }); };
       $('#done').onclick = () => exitPlay(backHash(cfg));
       backupNudge();
     }
@@ -361,7 +363,7 @@
       return `<details class="q-prev ${a.ok ? '' : 'open-bad'}" ${a.ok ? '' : 'open'}><summary><span class="pill ${a.ok ? 'good' : 'bad'}">${a.ok ? '✓' : '✗'}</span><span class="qn">${i + 1}</span><span class="grow">${q.s}</span></summary>
         <ol class="opts-prev">${q.o.map((o, k) => `<li class="${k === q.a ? 'ok' : ''} ${k === a.oi && !a.ok ? 'no' : ''}"><b>${L(k)}.</b> ${o}${k === a.oi ? ' <small>← your answer</small>' : ''}</li>`).join('')}</ol>
         ${a.oi === -1 ? '<div class="muted small">⏰ Not answered</div>' : ''}
-        <div class="src">${esc(chTitle(q.ch))} · Q${q.n}${q.r ? ' · 📖 ' + esc(q.r) : ''}</div>${q.x ? `<div class="note">ℹ️ ${esc(q.x)}</div>` : ''}</details>`;
+        <div class="src">${esc(chTitle(q.ch))} · Q${q.n}${q.r ? ' · 📖 ' + esc(q.r) : ''}</div>${q.x ? `<div class="note">ℹ️ ${esc(q.x)}</div>` : ''}<div class="xp" data-q="${a.id}"></div></details>`;
     }).join('')}</div>`;
   }
   function backupNudge() {
@@ -437,7 +439,7 @@
       view().innerHTML = `<div class="results"><div class="card glow res-hero"><div class="res-ring">${ring(pct / 100, 150, 12, '')}<div class="res-in"><b>${pct}%</b></div></div>
         <h2>${pct >= 80 ? 'Pass-level performance 🎓' : pct >= 65 ? 'Close — keep pushing 📈' : 'More practice needed 🔁'}</h2><p class="muted">${c} / ${n} correct · ${fmtMs(Date.now() - E.t0)}</p>${best ? '<div class="pill gold">🏆 New best exam score!</div>' : ''}</div>
         <div class="res-actions">${missed.length ? `<button class="btn" id="rm">🔁 Retry the ${missed.length} missed</button>` : ''}<button class="btn ghost" id="new">New exam</button><button class="btn ghost" id="done">Done</button></div>${reviewList(answers)}</div>`;
-      animateRings(view());
+      animateRings(view()); Explain.scan(view());
       if ($('#rm')) $('#rm').onclick = () => quiz(Object.assign({}, cfg, { modeId: 'challenge', title: 'Retry missed', ids: shuffle(missed), feedback: 'instant', challenge: true, retry: true }));
       $('#new').onclick = () => setup('exam', { chapters: cfg.chapters });
       $('#done').onclick = () => exitPlay(backHash(cfg));
@@ -469,13 +471,14 @@
           <div class="stem">${q.s}</div>
           <ol class="opts-prev">${q.o.map((o, i) => `<li class="${i === q.a ? 'ok' : ''}"><b>${L(i)}.</b> ${o}</li>`).join('')}</ol>
           ${cover ? '<button class="chip reveal-one">👁 Reveal answer</button>' : ''}
-          <div class="src">${q.r ? '📖 ' + esc(q.r) : ''}</div>${q.x ? `<div class="note">ℹ️ ${esc(q.x)}</div>` : ''}</article>`; }).join('')}
+          <div class="src">${q.r ? '📖 ' + esc(q.r) : ''}</div>${q.x ? `<div class="note">ℹ️ ${esc(q.x)}</div>` : ''}<div class="xp" data-q="${id}"></div></article>`; }).join('')}
         <div class="row gap center-row mt"><button class="btn" id="toCh">🎯 Now challenge this chapter</button></div></div>`;
       $('#quit').onclick = () => { document.body.classList.remove('playing'); location.hash = '#/ch/' + n; };
       $('#cov').onchange = e => { cover = e.target.checked; draw(); };
       $$('.reveal-one').forEach(b => b.onclick = () => { b.closest('.learn-q').classList.remove('covered'); b.remove(); FX.play('flip'); });
       $$('[data-star]').forEach(b => b.onclick = () => { const on = Store.toggleFlag(b.dataset.star); b.textContent = on ? '★' : '☆'; b.classList.toggle('on', on); });
       $('#toCh').onclick = () => start('challenge', { chapters: [n] });
+      Explain.scan(view());
     };
     draw(); window.scrollTo(0, 0);
   }
@@ -498,14 +501,19 @@
             <details class="fc-all"><summary>All options</summary><ol class="opts-prev">${q.o.map((o, i) => `<li class="${i === q.a ? 'ok' : ''}"><b>${L(i)}.</b> ${o}</li>`).join('')}</ol></details></div>
         </div></div>
         <div class="rate hidden" id="rate">${['Again', 'Hard', 'Good', 'Easy'].map((r, i) => `<button class="r${i + 1}" data-g="${i + 1}"><b>${r}</b><small>${fmtIvl(prev[i])}</small></button>`).join('')}</div>
-        <p class="muted small center" id="swipeHint">Swipe ← Again · → Good · ↑ Easy</p></div>`;
+        <p class="muted small center" id="swipeHint">Swipe ← Again · → Good · ↑ Easy</p>
+        <div class="xp fc-xp hidden" id="xp"></div></div>`;
       $('#quit').onclick = () => App.go(backHash(cfg));
       const fc = $('#fc');
       fc.onclick = e => { if (e.target.closest('details')) return; flip(); };
       $$('#rate [data-g]').forEach(b => b.onclick = () => rate(+b.dataset.g));
       swipe(fc);
     }
-    function flip() { flipped = !flipped; $('#fc').classList.toggle('flipped', flipped); if (flipped) $('#rate').classList.remove('hidden'); FX.play('flip'); }
+    function flip() {
+      flipped = !flipped; $('#fc').classList.toggle('flipped', flipped);
+      if (flipped) { $('#rate').classList.remove('hidden'); const x = $('#xp'); if (x && !x.dataset.m) { x.dataset.m = 1; x.classList.remove('hidden'); Explain.mount(x, queue[0]); } }
+      FX.play('flip');
+    }
     function rate(g) {
       if (!flipped) { flip(); return; }
       const id = queue.shift();
@@ -582,8 +590,9 @@
       const stamp = $('#stamp'); stamp.textContent = ok ? '✓' : '✗'; stamp.className = 'tf-stamp on ' + (ok ? 'good' : 'bad');
       if (ok) { correct++; combo++; maxC = Math.max(maxC, combo); score += 100 * (1 + Math.floor(combo / 4)); const g = 6 + Math.min(combo, 8); xp += g; Store.addXP(g); FX.play('correct'); FX.burst($('#tfc'), '#34d399'); FX.buzz(15); }
       else { combo = 0; FX.play('wrong'); FX.buzz([40, 30, 40]); $('#tfc').classList.add('shake'); }
-      $('#fb').innerHTML = `<div class="fb ${ok ? 'good' : 'bad'} pop-in"><div class="fb-h">${ok ? 'Correct!' : 'Wrong!'} The statement was <b>${it.truth ? 'TRUE' : 'FALSE'}</b>.</div><div class="fb-key">Book key: <b>${q.k}</b></div><button class="btn block" id="nextBtn">Next ›</button></div>`;
+      $('#fb').innerHTML = `<div class="fb ${ok ? 'good' : 'bad'} pop-in"><div class="fb-h">${ok ? 'Correct!' : 'Wrong!'} The statement was <b>${it.truth ? 'TRUE' : 'FALSE'}</b>.</div><div class="fb-key">Book key: <b>${q.k}</b></div><div class="xp" id="xp"></div><button class="btn block" id="nextBtn">Next ›</button></div>`;
       $('#nextBtn').onclick = () => { i++; draw(); };
+      Explain.mount($('#xp'), it.id, { open: !ok });
       App.checkAch({ combo: maxC });
     }
     function end() {
@@ -594,7 +603,7 @@
       view().innerHTML = `<div class="results"><div class="card glow res-hero"><div class="intro-logo">✅</div><h2>${score} pts</h2><p class="muted">${correct}/${items.length} judged correctly · best combo ${maxC}×</p>${best ? '<div class="pill gold">🏆 New best!</div>' : ''}<div class="res-stats"><div><b>+${xp}</b><small>XP</small></div></div></div>
         <div class="res-actions"><button class="btn" id="again">↻ Play again</button><button class="btn ghost" id="rv">📋 Review</button><button class="btn ghost" id="done">Done</button></div><div id="revList"></div></div>`;
       $('#again').onclick = () => truefalse(Object.assign({}, cfg, { ids: shuffle(cfg.ids) }));
-      $('#rv').onclick = () => $('#revList').innerHTML = reviewList(res);
+      $('#rv').onclick = () => { $('#revList').innerHTML = reviewList(res); Explain.scan($('#revList')); };
       $('#done').onclick = () => exitPlay(backHash(cfg));
       backupNudge();
     }
@@ -685,8 +694,9 @@
         }
       });
       function done(ok) {
-        $('#fb').innerHTML = `<div class="fb ${ok ? 'good' : 'bad'} pop-in"><div class="fb-h">${ok ? 'K.O.! Only the answer is left standing 🥊' : 'Knocked down! That was the correct answer 😵'}</div><div class="fb-key">Book key: <b>${q.k}</b></div>${q.x ? `<div class="note">ℹ️ ${esc(q.x)}</div>` : ''}<button class="btn block" id="nextBtn">Next ›</button></div>`;
+        $('#fb').innerHTML = `<div class="fb ${ok ? 'good' : 'bad'} pop-in"><div class="fb-h">${ok ? 'K.O.! Only the answer is left standing 🥊' : 'Knocked down! That was the correct answer 😵'}</div><div class="fb-key">Book key: <b>${q.k}</b></div>${q.x ? `<div class="note">ℹ️ ${esc(q.x)}</div>` : ''}<div class="xp" id="xp"></div><button class="btn block" id="nextBtn">Next ›</button></div>`;
         $('#nextBtn').onclick = () => { i++; draw(); };
+        Explain.mount($('#xp'), cfg.ids[i], { open: !ok });
         App.checkAch({});
       }
     }
@@ -699,7 +709,7 @@
       view().innerHTML = `<div class="results"><div class="card glow res-hero"><div class="intro-logo">🥊</div><h2>${pts} pts</h2><p class="muted">${wins}/${cfg.ids.length} knockouts · ${downs} knock-downs</p>${best ? '<div class="pill gold">🏆 New best!</div>' : ''}<div class="res-stats"><div><b>+${xp}</b><small>XP</small></div></div></div>
         <div class="res-actions"><button class="btn" id="again">↻ Play again</button><button class="btn ghost" id="rv">📋 Review</button><button class="btn ghost" id="done">Done</button></div><div id="revList"></div></div>`;
       $('#again').onclick = () => setup('knockout', { chapters: cfg.chapters });
-      $('#rv').onclick = () => $('#revList').innerHTML = reviewList(res);
+      $('#rv').onclick = () => { $('#revList').innerHTML = reviewList(res); Explain.scan($('#revList')); };
       $('#done').onclick = () => exitPlay(backHash(cfg));
       backupNudge();
     }

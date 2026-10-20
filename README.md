@@ -30,6 +30,12 @@ daily accuracy, activity heatmap, mastery radar by part, confidence calibration,
 Progress is stored **locally** in the browser. Use **Settings → Export backup** regularly
 (the app reminds you) and **Restore from file** to resume on any device.
 
+## 📖 Optional Greenberg explanation pack
+The app can show **verbatim passages, tables and figures from Greenberg's Handbook of Neurosurgery (10th ed.)**
+behind every answer, with a ✅ Verified / 🔶 Related / ⚠️ Differs-from-key label and a page reader.
+This content is **not** in this repository: it comes from a private `.tspack` file the owner loads once in
+**Settings → Greenberg explanation pack** (stored only in that browser's IndexedDB).
+
 ## Run locally
 ```
 cd docs

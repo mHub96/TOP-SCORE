@@ -368,6 +368,12 @@
         <div class="kv"><span>Persistent storage</span><b id="persist">checking…</b></div>
         <div class="row gap wrap mt"><button class="btn" id="exp">⬇️ Export backup</button><button class="btn ghost" id="imp">⬆️ Restore from file</button></div>
       </section>
+      <section class="card" id="xpack">
+        <h2>📖 Greenberg explanation pack</h2>
+        <p class="muted small">Load the explanation pack file (<b>.tspack</b>) once. It adds the verbatim Greenberg 10th ed. passages, tables and figures behind each answer. It is stored <b>only on this device</b> and never uploaded. If the browser data is cleared, just load the file again.</p>
+        <div id="xpStatus" class="muted small">Checking…</div>
+        <div class="row gap wrap mt"><button class="btn" id="xpLoad">📂 Load pack file</button><button class="btn ghost" id="xpDel" hidden>Remove pack</button></div>
+      </section>
       <section class="card">
         <h2>👤 Profile &amp; goals</h2>
         <label class="field"><span>Your name</span><input id="nm" value="${esc(set.name)}" placeholder="Doctor…"></label>
@@ -394,6 +400,7 @@
       </section>
       <section class="card danger-zone"><h2>⚠️ Danger zone</h2><button class="btn danger" id="rst">Reset all progress</button></section>`;
     $('#exp').onclick = doExport; $('#imp').onclick = doImport;
+    packUI();
     $('#nm').onchange = e => { set.name = e.target.value.trim(); Store.save(); };
     $('#goal').oninput = e => { set.goal = +e.target.value; $('#gv').textContent = set.goal; Store.save(); };
     $('#exs').oninput = e => { set.examSecs = +e.target.value; $('#ev').textContent = set.examSecs; Store.save(); };
@@ -406,6 +413,26 @@
     if (navigator.storage && navigator.storage.persisted) navigator.storage.persisted().then(p => $('#persist').textContent = p ? 'Granted ✅' : 'Not granted (backup advised)');
     else $('#persist').textContent = 'Unsupported';
   };
+  async function packUI() {
+    await Explain.ready;
+    const i = Explain.info(), st = $('#xpStatus'); if (!st) return;
+    if (i) {
+      const c = i.counts || {};
+      st.innerHTML = `<div class="kv"><span>Status</span><b>Loaded ✅</b></div><div class="kv"><span>Verified explanations</span><b>${c.V || 0}</b></div><div class="kv"><span>Related reading</span><b>${c.R || 0}</b></div><div class="kv"><span>Differs from key</span><b>${c.C || 0}</b></div><div class="kv"><span>Figures &amp; tables</span><b>${c.images || 0}</b></div><div class="kv"><span>Size</span><b>${(i.size / 1048576).toFixed(1)} MB</b></div><div class="kv"><span>Built</span><b>${esc(i.built || '')}</b></div>`;
+      $('#xpDel').hidden = false; $('#xpLoad').textContent = '📂 Replace pack file';
+    } else { st.textContent = 'Not loaded. Answers show the key and the Greenberg page number only.'; $('#xpDel').hidden = true; }
+    $('#xpLoad').onclick = () => {
+      const inp = document.createElement('input'); inp.type = 'file';
+      inp.onchange = async () => {
+        const f = inp.files[0]; if (!f) return;
+        st.textContent = 'Loading pack… (large file, please wait)';
+        try { await Explain.load(f); toast('📖 Explanation pack loaded'); FX.play('win'); FX.confetti(); packUI(); }
+        catch (e) { st.textContent = '⚠️ ' + (e.message || 'Could not load the file.'); }
+      };
+      inp.click();
+    };
+    $('#xpDel').onclick = async () => { if (await confirmBox('Remove the explanation pack?', 'Your progress is not affected. You can load the file again any time.', 'Remove')) { await Explain.remove(); toast('Pack removed'); packUI(); } };
+  }
   const toggle = (k, label, on) => `<label class="switch-row"><span>${label}</span><input type="checkbox" data-tg="${k}" ${on ? 'checked' : ''}><i class="switch"></i></label>`;
 
   // ---------- achievements ----------
