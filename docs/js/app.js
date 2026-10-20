@@ -72,6 +72,32 @@
   }
   addEventListener('hashchange', render);
 
+  // ---------- resume last session ----------
+  const ago = ts => { const m = Math.round((Date.now() - ts) / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' d ago'; };
+  function resumeCard() {
+    const r = window.Modes && Modes.resume.get(); if (!r) return '';
+    return `<section class="card resume-card pop-in"><div class="rc-ic">▶️</div><div class="grow"><div class="eyebrow">Continue where you left off</div><b>${esc(r.label)}</b><div class="muted small">${esc(r.prog || '')} · ${ago(r.ts)}</div></div>
+      <div class="rc-btns"><button class="btn" data-resume>Resume</button><button class="icon-btn" data-resume-x aria-label="Discard saved session">✕</button></div></section>`;
+  }
+  function resumeNow() { if (!Modes.resume.run()) toast('That session can no longer be resumed.'); }
+  async function discardResume(el) {
+    if (await confirmBox('Discard the saved session?', 'Answers you already gave stay recorded in your progress.', 'Discard', 'Keep')) { Modes.resume.clear(); el && el.remove(); toast('Saved session discarded'); }
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-resume],[data-resume-x]'); if (!b) return;
+    if (b.hasAttribute('data-resume')) resumeNow(); else discardResume(b.closest('.resume-card'));
+  });
+  function resumePrompt() {
+    const r = Modes.resume.get(); if (!r || location.hash.startsWith('#/play')) return;
+    const m = modal(`<div class="center"><div class="intro-logo">▶️</div><h3>Resume your last session?</h3>
+      <p><b>${esc(r.label)}</b></p><p class="muted small">${esc(r.prog || '')} · saved ${ago(r.ts)}</p>
+      <div class="row gap center-row wrap"><button class="btn ghost" id="rsLater">Not now</button><button class="btn" id="rsGo">▶️ Resume</button></div>
+      <button class="link-btn muted small" id="rsDrop">Discard it</button></div>`, { cls: 'center-modal' });
+    $('#rsGo', m).onclick = () => { m.close(); resumeNow(); };
+    $('#rsLater', m).onclick = () => m.close();
+    $('#rsDrop', m).onclick = () => { m.close(); Modes.resume.clear(); const c = $('.resume-card'); c && c.remove(); toast('Saved session discarded'); };
+  }
+
   // ---------- home ----------
   routes.home = () => {
     const st = S(), lv = Store.levelInfo(), today = Store.day(), streak = Store.streak();
@@ -83,6 +109,7 @@
     const weak = weakestChapters(3);
     view().innerHTML = `
       ${backupBanner()}
+      ${resumeCard()}
       <section class="hero card glow">
         <div class="hero-top">
           <div>
@@ -528,7 +555,7 @@
         <p>${ALL.length.toLocaleString()} board-style MCQs, taken straight from the book with every answer key verified.</p>
         <ul class="intro-list"><li>🧠 <b>Smart Review</b> schedules each question right before you'd forget it (FSRS).</li><li>🎯 <b>MCQ Challenge</b> exams you, scores you, then retries your misses.</li><li>🎮 <b>Games</b>: Blitz, Survival, Boss battles and more.</li><li>💾 Progress is saved on this device. <b>Export a backup often</b> (Settings) so a cleared browser can't erase it.</li></ul>
         <button class="btn block" onclick="this.closest('.modal-wrap').close()">Let's start</button></div>`, { cls: 'center-modal' }), 400);
-    }
+    } else setTimeout(resumePrompt, 500);
   });
   addEventListener('beforeinstallprompt', e => { e.preventDefault(); App.installEvt = e; });
   if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').then(reg => {

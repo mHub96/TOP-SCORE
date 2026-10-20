@@ -573,3 +573,14 @@ mark { background: color-mix(in srgb, var(--accent2) 30%, transparent); color: i
 .xr-h { margin: 14px 0 6px; font-size: 1rem; }
 .xr-p { font-size: .9rem; line-height: 1.55; margin: 6px 0; }
 .btn.sm { padding: 6px 10px; font-size: .8rem; }
+
+/* ---------- resume card ---------- */
+.resume-card { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 14%, var(--card)), var(--card)); }
+.resume-card .rc-ic { font-size: 1.8rem; animation: rcPulse 2.4s ease-in-out infinite; }
+.resume-card b { display: block; line-height: 1.3; }
+.resume-card .grow { flex: 1 1 200px; min-width: 0; }
+.resume-card .rc-btns { display: flex; align-items: center; gap: 8px; flex: 1 1 100%; }
+.resume-card .rc-btns .btn { flex: 1; }
+@keyframes rcPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+@media (prefers-reduced-motion: reduce) { .resume-card .rc-ic { animation: none; } }
+.link-btn { background: none; border: 0; font: inherit; cursor: pointer; text-decoration: underline; margin-top: 10px; }

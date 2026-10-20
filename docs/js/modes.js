@@ -25,6 +25,36 @@
   const M = id => list.find(m => m.id === id);
   let SID = 0;
 
+  // ---------- resume: snapshot of the running session, kept in localStorage ----------
+  const RKEY = 'topscore.resume';
+  let snapFn = null, scrollT = null;
+  const Resume = {
+    track(fn) { snapFn = fn; Resume.save(); },
+    save() {
+      if (!snapFn || !document.body.classList.contains('playing')) return;
+      try { const s = snapFn(); if (s) localStorage.setItem(RKEY, JSON.stringify(Object.assign(s, { v: 1, ts: Date.now() }))); } catch (e) { /* storage full or blocked */ }
+    },
+    clear() { snapFn = null; try { localStorage.removeItem(RKEY); } catch (e) { } },
+    get() {
+      try { const s = JSON.parse(localStorage.getItem(RKEY)); return s && s.v === 1 && Date.now() - s.ts < 30 * 86400000 ? s : null; } catch (e) { return null; }
+    },
+    run() {
+      const s = Resume.get(); if (!s) return false;
+      if (s.kind === 'quiz') quiz(s.cfg, s.st);
+      else if (s.kind === 'exam') exam(s.cfg, s.st);
+      else if (s.kind === 'learn') learn(s.n, s);
+      else if (s.kind === 'flash') flash(s.cfg, s.st);
+      else if (s.kind === 'tf') truefalse(s.cfg, s.st);
+      else if (s.kind === 'match') match(s.cfg, s.st);
+      else if (s.kind === 'knockout') knockout(s.cfg, s.st);
+      else return false;
+      return true;
+    }
+  };
+  addEventListener('pagehide', () => Resume.save());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) Resume.save(); });
+  addEventListener('scroll', () => { if (!snapFn || !document.body.classList.contains('playing')) return; clearTimeout(scrollT); scrollT = setTimeout(Resume.save, 600); }, { passive: true });
+
   // ---------- scope / setup sheet ----------
   function setup(modeId, preset = {}) {
     const m = M(modeId);
@@ -124,7 +154,7 @@
   function enterPlay(guard = true) {
     history.pushState(null, '', '#/play');
     document.body.classList.add('playing');
-    App.setLeaveGuard(guard ? () => confirmBox('Leave this session?', 'Your answers so far are saved, but this session will end.', 'Leave', 'Stay') : null);
+    App.setLeaveGuard(guard ? async () => { const ok = await confirmBox('Leave this session?', 'Your answers are saved. You can resume this session later from Home.', 'Leave', 'Stay'); if (ok) Resume.save(); return ok; } : null);
     window.scrollTo(0, 0);
   }
   function exitPlay(hash = '#/') { App.setLeaveGuard(null); stopKeys(); location.hash = hash; }
@@ -137,7 +167,7 @@
   const BOSS_NAMES = ['Hydra', 'Leviathan', 'Chimera', 'Golem', 'Wraith', 'Kraken', 'Minotaur', 'Basilisk', 'Gorgon', 'Behemoth'];
 
   // ---------- generic MCQ runner ----------
-  function quiz(cfg) {
+  function quiz(cfg, saved) {
     enterPlay();
     const st = S();
     const R = { i: 0, score: 0, correct: 0, wrong: 0, combo: 0, maxCombo: 0, lives: cfg.lives || 0, answers: [], xp: 0, t0: Date.now(), cbm: 0 };
@@ -150,6 +180,15 @@
     const total = cfg.ids.length;
     const endless = cfg.blitz || cfg.survival || cfg.boss;
     let pool = cfg.ids.slice();
+    if (saved) {
+      Object.assign(R, saved.R); pool = saved.pool; R.t0 = Date.now() - (saved.el || 0); R.done = false;
+      if (cfg.timeLimit) deadline = Date.now() + Math.max(1000, saved.left || 0);
+    }
+    Resume.track(() => R.done ? null : {
+      kind: 'quiz', label: cfg.title + ' · ' + cfg.scope, cfg,
+      prog: endless ? `${R.correct} correct · ${R.wrong} wrong` : `${R.i} of ${total} answered`,
+      st: { R: Object.assign({}, R), pool, left: deadline ? deadline - Date.now() : 0, el: Date.now() - R.t0 }
+    });
 
     function frame() {
       view().innerHTML = `
@@ -244,6 +283,7 @@
         $('.qcard').classList.add('shake');
       }
       if (conf) R.cbm += ok ? [0, 1, 2, 3][conf] : [0, 0, -2, -6][conf];
+      Resume.save();
       if (gain) { R.xp += gain; Store.addXP(gain); FX.floatText(btn, '+' + gain + ' XP'); }
       $$('.opt').forEach(b => { b.disabled = true; if (+b.dataset.oi === q.a) b.classList.add('right'); });
       App.checkAch({ combo: R.maxCombo, calib: !!conf });
@@ -297,7 +337,7 @@
 
     function finish() {
       if (R.done) return; R.done = true;
-      clearInterval(timerInt); stopKeys(); App.setLeaveGuard(null);
+      clearInterval(timerInt); stopKeys(); App.setLeaveGuard(null); Resume.clear();
       const answered = R.answers.length;
       const pct = answered ? Math.round(R.correct / answered * 100) : 0;
       const missed = [...new Set(R.answers.filter(a => !a.ok).map(a => a.id))];
@@ -379,12 +419,18 @@
   }
 
   // ---------- exam simulator ----------
-  function exam(cfg) {
+  function exam(cfg, saved) {
     enterPlay();
     const st = S(), n = cfg.ids.length;
     const E = { cur: 0, ans: {}, flags: {}, orders: {}, t0: Date.now(), deadline: Date.now() + n * st.settings.examSecs * 1000, qStart: Date.now(), time: {} };
     cfg.ids.forEach(id => E.orders[id] = optOrder(Q[id], false));
-    let timer;
+    if (saved) Object.assign(E, saved.E, { t0: Date.now() - saved.el, deadline: Date.now() + Math.max(5000, saved.left), qStart: Date.now() });
+    let timer, submitted = false;
+    Resume.track(() => submitted ? null : {
+      kind: 'exam', label: 'Exam Simulator · ' + cfg.scope, cfg,
+      prog: `${Object.keys(E.ans).length} of ${n} answered · ${Math.max(0, Math.round((E.deadline - Date.now()) / 60000))} min left`,
+      st: { E, left: E.deadline - Date.now(), el: Date.now() - E.t0 }
+    });
     function draw() {
       const id = cfg.ids[E.cur], q = Q[id], ord = E.orders[id];
       view().innerHTML = `
@@ -402,14 +448,14 @@
           </article>
         </div>`;
       $('#quit').onclick = () => App.go(backHash(cfg));
-      $$('.opt').forEach(b => b.onclick = () => { E.ans[id] = +b.dataset.oi; $$('.opt').forEach(x => x.classList.toggle('sel', x === b)); FX.play('tap'); });
-      $('#flag').onclick = () => { E.flags[id] = !E.flags[id]; draw(); };
+      $$('.opt').forEach(b => b.onclick = () => { E.ans[id] = +b.dataset.oi; $$('.opt').forEach(x => x.classList.toggle('sel', x === b)); FX.play('tap'); Resume.save(); });
+      $('#flag').onclick = () => { E.flags[id] = !E.flags[id]; draw(); Resume.save(); };
       $('#prev').onclick = () => move(E.cur - 1);
       $('#nxt').onclick = () => E.cur === n - 1 ? submitAsk() : move(E.cur + 1);
       $('#grid').onclick = gridModal;
       tick();
     }
-    function move(i) { const id = cfg.ids[E.cur]; E.time[id] = (E.time[id] || 0) + Date.now() - E.qStart; E.qStart = Date.now(); E.cur = Math.max(0, Math.min(n - 1, i)); draw(); }
+    function move(i) { const id = cfg.ids[E.cur]; E.time[id] = (E.time[id] || 0) + Date.now() - E.qStart; E.qStart = Date.now(); E.cur = Math.max(0, Math.min(n - 1, i)); draw(); Resume.save(); }
     function gridModal() {
       const m = modal(`<h3>Navigator</h3><div class="navgrid">${cfg.ids.map((id, i) => `<button class="${E.ans[id] !== undefined ? 'done' : ''} ${E.flags[id] ? 'flag' : ''} ${i === E.cur ? 'cur' : ''}" data-i="${i}">${i + 1}</button>`).join('')}</div>
         <p class="muted small">Answered ${Object.keys(E.ans).length} · Flagged ${Object.values(E.flags).filter(Boolean).length}</p><button class="btn block" id="sub">Submit exam</button>`);
@@ -426,7 +472,8 @@
       if (left <= 0) { toast('⏰ Time is up — exam submitted'); submit(); }
     }
     function submit() {
-      clearInterval(timer); stopKeys(); App.setLeaveGuard(null);
+      if (submitted) return; submitted = true;
+      clearInterval(timer); stopKeys(); App.setLeaveGuard(null); Resume.clear();
       const answers = cfg.ids.map(id => { const oi = E.ans[id] ?? -1, ok = oi === Q[id].a; Store.answer(id, ok, { mode: 'exam', ms: E.time[id] || 0 }); return { id, oi, ok }; });
       const c = answers.filter(a => a.ok).length, pct = Math.round(c / n * 100);
       Store.addXP(c * 12);
@@ -457,8 +504,9 @@
   }
 
   // ---------- learn ----------
-  function learn(n) {
-    const ch = CH[n]; let cover = false;
+  function learn(n, saved) {
+    const ch = CH[n]; let cover = !!(saved && saved.cover);
+    Resume.track(() => ({ kind: 'learn', n, cover, y: Math.round(scrollY), label: 'Learn · ' + chTitle(n), prog: `${ch.q.length} questions` }));
     App.setLeaveGuard(null);
     history.pushState(null, '', '#/play');
     document.body.classList.add('playing');
@@ -473,21 +521,24 @@
           ${cover ? '<button class="chip reveal-one">👁 Reveal answer</button>' : ''}
           <div class="src">${q.r ? '📖 ' + esc(q.r) : ''}</div>${q.x ? `<div class="note">ℹ️ ${esc(q.x)}</div>` : ''}<div class="xp" data-q="${id}"></div></article>`; }).join('')}
         <div class="row gap center-row mt"><button class="btn" id="toCh">🎯 Now challenge this chapter</button></div></div>`;
-      $('#quit').onclick = () => { document.body.classList.remove('playing'); location.hash = '#/ch/' + n; };
-      $('#cov').onchange = e => { cover = e.target.checked; draw(); };
+      $('#quit').onclick = () => { Resume.save(); document.body.classList.remove('playing'); location.hash = '#/ch/' + n; };
+      $('#cov').onchange = e => { cover = e.target.checked; draw(); Resume.save(); };
       $$('.reveal-one').forEach(b => b.onclick = () => { b.closest('.learn-q').classList.remove('covered'); b.remove(); FX.play('flip'); });
       $$('[data-star]').forEach(b => b.onclick = () => { const on = Store.toggleFlag(b.dataset.star); b.textContent = on ? '★' : '☆'; b.classList.toggle('on', on); });
       $('#toCh').onclick = () => start('challenge', { chapters: [n] });
       Explain.scan(view());
     };
-    draw(); window.scrollTo(0, 0);
+    draw(); window.scrollTo(0, saved ? saved.y || 0 : 0);
+    if (saved && saved.y) setTimeout(() => window.scrollTo(0, saved.y), 120);
   }
 
   // ---------- flashcards ----------
-  function flash(cfg) {
+  function flash(cfg, saved) {
     enterPlay();
     let queue = cfg.ids.slice(), done = 0, again = 0, flipped = false, xp = 0;
-    const t0 = Date.now(), total = queue.length;
+    if (saved) ({ queue, done, again, xp } = saved);
+    const t0 = Date.now() - (saved ? saved.el : 0), total = saved ? saved.total : queue.length;
+    Resume.track(() => queue.length ? { kind: 'flash', label: 'Flashcards · ' + cfg.scope, cfg, prog: `${done} of ${total} cards done`, st: { queue, done, again, xp, total, el: Date.now() - t0 } } : null);
     function draw() {
       if (!queue.length) return end();
       const id = queue[0], q = Q[id];
@@ -521,6 +572,7 @@
       const gain = [0, 2, 6, 10, 12][g]; xp += gain; Store.addXP(gain);
       if (g === 1) { again++; queue.splice(Math.min(queue.length, 3 + Math.floor(Math.random() * 3)), 0, id); FX.play('wrong'); }
       else { done++; FX.play('correct'); }
+      Resume.save();
       const fc = $('#fc'); fc.classList.add(g === 1 ? 'fly-left' : g === 4 ? 'fly-up' : 'fly-right');
       App.checkAch({});
       setTimeout(draw, 260);
@@ -537,7 +589,7 @@
       el.addEventListener('click', e => { if (Math.abs(dx) > 10 || Math.abs(dy) > 10) { e.stopImmediatePropagation(); } }, true);
     }
     function end() {
-      stopKeys(); App.setLeaveGuard(null);
+      stopKeys(); App.setLeaveGuard(null); Resume.clear();
       Store.session({ mode: 'flash', name: 'Flashcards', scope: cfg.scope, score: total, total });
       FX.confetti(120); FX.play('win');
       view().innerHTML = `<div class="results"><div class="card glow res-hero"><div class="intro-logo">🃏</div><h2>Deck complete!</h2><p class="muted">${total} cards · ${again} “Again” repeats · ${fmtMs(Date.now() - t0)}</p>
@@ -557,15 +609,17 @@
   }
 
   // ---------- true / false ----------
-  function truefalse(cfg) {
+  function truefalse(cfg, saved) {
     enterPlay();
-    const items = cfg.ids.map(id => {
+    const items = saved ? saved.items : cfg.ids.map(id => {
       const q = Q[id], truth = Math.random() < 0.5;
       let oi = q.a;
       if (!truth) { const wrong = q.o.map((_, i) => i).filter(i => i !== q.a); oi = wrong[Math.floor(Math.random() * wrong.length)]; }
       return { id, oi, truth };
     });
-    let i = 0, score = 0, combo = 0, maxC = 0, correct = 0, xp = 0, locked = false; const res = [];
+    let i = 0, score = 0, combo = 0, maxC = 0, correct = 0, xp = 0, locked = false, res = [], ended = false;
+    if (saved) { ({ score, combo, maxC, correct, xp, res } = saved); i = res.length; }
+    Resume.track(() => ended ? null : { kind: 'tf', label: 'True or False · ' + cfg.scope, cfg, prog: `${res.length} of ${items.length} judged`, st: { items, score, combo, maxC, correct, xp, res } });
     function draw() {
       if (i >= items.length) return end();
       locked = false;
@@ -593,10 +647,11 @@
       $('#fb').innerHTML = `<div class="fb ${ok ? 'good' : 'bad'} pop-in"><div class="fb-h">${ok ? 'Correct!' : 'Wrong!'} The statement was <b>${it.truth ? 'TRUE' : 'FALSE'}</b>.</div><div class="fb-key">Book key: <b>${q.k}</b></div><div class="xp" id="xp"></div><button class="btn block" id="nextBtn">Next ›</button></div>`;
       $('#nextBtn').onclick = () => { i++; draw(); };
       Explain.mount($('#xp'), it.id, { open: !ok });
+      Resume.save();
       App.checkAch({ combo: maxC });
     }
     function end() {
-      stopKeys(); App.setLeaveGuard(null);
+      ended = true; stopKeys(); App.setLeaveGuard(null); Resume.clear();
       const best = Store.setBest('tf', score);
       Store.session({ mode: 'tf', name: 'True or False', scope: cfg.scope, score: correct, total: items.length });
       if (correct / items.length >= 0.8) { FX.confetti(); FX.play('win'); } else FX.play('correct');
@@ -612,18 +667,22 @@
   }
 
   // ---------- match pairs ----------
-  function match(cfg) {
+  function match(cfg, saved) {
     const BAD = /\babove\b|\bbelow\b|\bboth\b|^[A-I](\s|,|$)|\b[A-I]\s*(,|and|\+)\s*[A-I]\b|^none\b|^all\b/i;
     const usable = cfg.ids.filter(id => { const q = Q[id], a = strip(q.o[q.a]); return a.length <= 90 && !BAD.test(a); });
     if (usable.length < 3) { toast('Not enough short-answer questions in this selection — pick more chapters.'); return; }
     enterPlay();
     let round = 0, pts = 0, totalMiss = 0, xp = 0; const t0 = Date.now(); const rounds = 3;
-    let deck = shuffle(usable);
-    function board() {
+    let deck = shuffle(usable), chosen = [], ended = false;
+    if (saved) ({ round, pts, totalMiss, xp, deck } = saved);
+    Resume.track(() => ended ? null : { kind: 'match', label: 'Match Pairs · ' + cfg.scope, cfg, prog: `Round ${round + 1} of ${rounds} · ${pts} pts`, st: { round, pts, totalMiss, xp, deck, cur: chosen } });
+    function board(preset) {
       // pick up to 5 with unique answer texts
-      const chosen = [], seenA = new Set();
-      while (deck.length && chosen.length < 5) { const id = deck.shift(); const a = strip(Q[id].o[Q[id].a]).toLowerCase(); if (!seenA.has(a)) { seenA.add(a); chosen.push(id); } }
+      chosen = preset ? preset.slice() : [];
+      const seenA = new Set();
+      while (!preset && deck.length && chosen.length < 5) { const id = deck.shift(); const a = strip(Q[id].o[Q[id].a]).toLowerCase(); if (!seenA.has(a)) { seenA.add(a); chosen.push(id); } }
       if (chosen.length < 3) { deck = shuffle(usable); return board(); }
+      Resume.save();
       let selL = null, miss = 0, left = chosen.length; const rs = Date.now();
       view().innerHTML = `<div class="play match">
         <div class="play-top"><button class="icon-btn" id="quit">✕</button><div class="grow"><div class="row between small"><b>Match Pairs · Round ${round + 1}/${rounds}</b><span class="muted" id="mt">0s</span></div><div class="prog"><i style="width:${round / rounds * 100}%"></i></div></div><div class="hud"><span class="hud-s">${pts}</span></div></div>
@@ -639,7 +698,7 @@
         if (ok) {
           Store.answer(b.dataset.id, true, { mode: 'match' });
           [selL, b].forEach(x => { x.classList.add('matched'); setTimeout(() => x.classList.add('gone'), 450); });
-          FX.burst(b, '#34d399'); FX.play('correct'); FX.buzz(15); pts += 100; xp += 8; Store.addXP(8); left--; selL = null;
+          FX.burst(b, '#34d399'); FX.play('correct'); FX.buzz(15); pts += 100; xp += 8; Store.addXP(8); left--; selL = null; Resume.save();
           if (!left) { clearInterval(tm); const secs = (Date.now() - rs) / 1000; const bonus = Math.max(0, Math.round(300 - secs * 5)); pts += bonus; if (!miss) { pts += 200; App.unlock('match'); } setTimeout(() => { round++; toast(`Round clear! ${bonus ? '+' + bonus + ' speed bonus' : ''}${!miss ? ' · +200 flawless' : ''}`); round < rounds ? board() : end(); }, 650); }
         } else {
           miss++; totalMiss++; Store.answer(selL.dataset.id, false, { mode: 'match' });
@@ -649,7 +708,7 @@
       });
     }
     function end() {
-      stopKeys(); App.setLeaveGuard(null);
+      ended = true; stopKeys(); App.setLeaveGuard(null); Resume.clear();
       const best = Store.setBest('match', pts);
       Store.session({ mode: 'match', name: 'Match Pairs', scope: cfg.scope, score: pts });
       FX.confetti(); FX.play('win');
@@ -658,13 +717,15 @@
       $('#again').onclick = () => match(cfg); $('#done').onclick = () => exitPlay(backHash(cfg));
       App.checkAch({}); backupNudge();
     }
-    board();
+    board(saved && saved.cur && saved.cur.length >= 3 ? saved.cur : null);
   }
 
   // ---------- knockout ----------
-  function knockout(cfg) {
+  function knockout(cfg, saved) {
     enterPlay();
-    let i = 0, pts = 0, downs = 0, xp = 0, wins = 0; const res = [];
+    let i = 0, pts = 0, downs = 0, xp = 0, wins = 0, res = [], ended = false;
+    if (saved) { ({ pts, downs, xp, wins, res } = saved); i = res.length; }
+    Resume.track(() => ended ? null : { kind: 'knockout', label: 'Knockout · ' + cfg.scope, cfg, prog: `${res.length} of ${cfg.ids.length} done`, st: { pts, downs, xp, wins, res } });
     function draw() {
       if (i >= cfg.ids.length) return end();
       const id = cfg.ids[i], q = Q[id], ord = optOrder(q, false);
@@ -697,11 +758,12 @@
         $('#fb').innerHTML = `<div class="fb ${ok ? 'good' : 'bad'} pop-in"><div class="fb-h">${ok ? 'K.O.! Only the answer is left standing 🥊' : 'Knocked down! That was the correct answer 😵'}</div><div class="fb-key">Book key: <b>${q.k}</b></div>${q.x ? `<div class="note">ℹ️ ${esc(q.x)}</div>` : ''}<div class="xp" id="xp"></div><button class="btn block" id="nextBtn">Next ›</button></div>`;
         $('#nextBtn').onclick = () => { i++; draw(); };
         Explain.mount($('#xp'), cfg.ids[i], { open: !ok });
+        Resume.save();
         App.checkAch({});
       }
     }
     function end() {
-      stopKeys(); App.setLeaveGuard(null);
+      ended = true; stopKeys(); App.setLeaveGuard(null); Resume.clear();
       const best = Store.setBest('knockout', pts);
       if (!downs && cfg.ids.length >= 5) App.unlock('ko');
       Store.session({ mode: 'knockout', name: 'Knockout', scope: cfg.scope, score: wins, total: cfg.ids.length });
@@ -717,6 +779,6 @@
     draw();
   }
 
-  window.Modes = { list, setup, start };
+  window.Modes = { list, setup, start, resume: Resume };
   App.routes.play = () => { if (!view().querySelector('.play,.results')) location.replace('#/'); };
 })();

@@ -1,5 +1,5 @@
 /* TOP SCORE service worker — offline-first app shell. Bump VERSION on every deploy. */
-const VERSION = 'topscore-v1.1.0';
+const VERSION = 'topscore-v1.2.0';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
   'js/data.js', 'js/fsrs.js', 'js/store.js', 'js/explain.js', 'js/fx.js', 'js/charts.js', 'js/app.js', 'js/modes.js',
