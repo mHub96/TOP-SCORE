@@ -45,8 +45,9 @@
   function part(name, type) { const f = H.files[name]; if (!f) return null; return blob.slice(base + f[0], base + f[0] + f[1], type || f[2]); }
   async function json(name) { const b = part(name); return b ? JSON.parse(await b.text()) : null; }
   function url(name) { if (!urls[name]) { const b = part(name); if (!b) return ''; urls[name] = URL.createObjectURL(b); } return urls[name]; }
+  const isTS = id => /^\d+-\d+$/.test(String(id));   // Greenberg explanations exist only for Top Score questions
   async function forQ(id) {
-    await ready; if (!H) return null;
+    await ready; if (!H || !isTS(id)) return null;
     const ch = id.split('-')[0];
     if (!chCache[ch]) chCache[ch] = json('q/' + ch + '.json').catch(() => ({}));
     return ((await chCache[ch]) || {})[id] || null;
@@ -87,6 +88,7 @@
   }
   async function mount(el, id, opts = {}) {
     if (!el) return;
+    if (!isTS(id)) { el.innerHTML = ''; return; }
     await ready;
     if (!H) { el.innerHTML = opts.hint ? `<div class="xnone muted small">📖 Load the Greenberg explanation pack in <a href="#/settings">Settings</a> to see explanations here.</div>` : ''; return; }
     const e = await forQ(id);

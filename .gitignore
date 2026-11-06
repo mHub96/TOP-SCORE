@@ -7,3 +7,7 @@ node_modules/
 *.tspack
 pack-build/
 Greenberg-Verification-Report.md
+
+# Multi-book pack build (contains book content) — keep local only
+books-build/
+Books/
