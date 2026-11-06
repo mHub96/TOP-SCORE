@@ -129,11 +129,12 @@
     if (f === 'new') return ids.filter(id => !st.cards[id]);
     if (f === 'due') return ids.filter(id => st.cards[id] && st.cards[id].due <= now);
     if (f === 'mistakes') return ids.filter(id => st.cards[id] && (!st.cards[id].ok || (st.cards[id].w && Store.tier(id) <= 1)));
-    if (f === 'flagged') return ids.filter(id => st.flags[id]);
+    if (f === 'flagged') return ids.filter(Store.isFlagged);
     return ids;
   }
   /* which questions a mode can use */
   function usable(modeId, ids) {
+    if (modeId !== 'learn') ids = ids.filter(id => !Store.isSkipped(id));
     if (!PRACTICE_OK.has(modeId)) ids = ids.filter(Store.keyed);
     if (modeId === 'match') ids = ids.filter(id => { const q = Q[id]; return !Store.multi(q) && !q.lab && !q.img; });
     return ids;
@@ -276,10 +277,10 @@
       order = optOrder(q, cfg.forceShuffle || cfg.blitz || cfg.survival);
       const multi = Store.multi(q);
       const rf = st.settings.recallFirst && !cfg.blitz && !cfg.timeLimit;
-      const flagged = !!st.flags[id];
+      const flagged = Store.isFlagged(id);
       $('#qbox').innerHTML = `
         <article class="${qcardClass(q)} slide-in" data-id="${id}">
-          ${qMeta(q, id, `<button class="star ${flagged ? 'on' : ''}" id="star" aria-label="Star question">${flagged ? '★' : '☆'}</button>`)}
+          ${qMeta(q, id, `<button class="skipbtn" id="skipQ" title="Skip this question from now on" aria-label="Skip this question">⏭</button><button class="star ${flagged ? 'on' : ''}" id="star" aria-label="Star question">${flagged ? '★' : '☆'}</button>`)}
           <div class="qmain"><div class="qleft">${stemHTML(q)}</div><div class="qright">
           ${rf ? `<button class="btn ghost block" id="reveal">🤔 I've thought of my answer — show options</button>` : ''}
           <div class="opts ${rf ? 'hidden' : ''} ${multi ? 'multi' : ''}" id="opts">${order.map((oi, k) => `<button class="opt" data-oi="${oi}" style="--d:${k * 40}ms"><span class="ol">${L(k)}</span><span class="ot">${optText(q, oi)}</span></button>`).join('')}</div>
@@ -288,6 +289,12 @@
           <div id="fb"></div></div></div>
         </article>`;
       $('#star').onclick = () => { const on = Store.toggleFlag(id); $('#star').textContent = on ? '★' : '☆'; $('#star').classList.toggle('on', on); FX.play('tap'); };
+      $('#skipQ').onclick = () => {
+        Store.setSkip(id, true); FX.play('tap');
+        toast('⏭ Skipped — it won’t be asked again until you un-skip it (chapter or book page).', 3200);
+        if (locked) return;
+        R.answers.push({ id, oi: null, ok: null, sk: 1 }); R.i++; Resume.save(); next();
+      };
       if (rf) $('#reveal').onclick = () => { $('#opts').classList.remove('hidden'); $('#reveal').remove(); };
       let picked = null; const sel = new Set();
       $$('.opt').forEach(b => b.onclick = () => {
@@ -412,7 +419,8 @@
     function finish() {
       if (R.done) return; R.done = true;
       clearInterval(timerInt); stopKeys(); App.setLeaveGuard(null); Resume.done();
-      const scored = R.answers.filter(a => a.ok !== null);
+      const scored = R.answers.filter(a => a.ok !== null && !a.sk);
+      const skippedN = R.answers.filter(a => a.sk).length;
       const answered = scored.length;
       const pctv = answered ? Math.round(R.correct / answered * 100) : 0;
       const missed = [...new Set(scored.filter(a => !a.ok).map(a => a.id))];
@@ -425,7 +433,7 @@
         if (win) { App.unlock('boss'); Store.addXP(100); R.xp += 100; }
         bestKey = 'boss-' + (cfg.chapters ? cfg.chapters[0] : 0); bestVal = win ? 1 : null;
       } else {
-        headline = answered ? pctv + '%' : '—'; sub = `${R.correct} of ${answered} correct${R.practice ? ` · ${R.practice} practice (unscored)` : ''}${R.maxCombo > 2 ? ` · best combo ${R.maxCombo}×` : ''}`;
+        headline = answered ? pctv + '%' : '—'; sub = `${R.correct} of ${answered} correct${R.practice ? ` · ${R.practice} practice (unscored)` : ''}${skippedN ? ` · ${skippedN} skipped` : ''}${R.maxCombo > 2 ? ` · best combo ${R.maxCombo}×` : ''}`;
         if (cfg.challenge && cfg.full && cfg.chapters && cfg.chapters.length === 1 && !cfg.retry && answered === CH[cfg.chapters[0]].keyed.length) {
           bestKey = 'challenge-' + cfg.chapters[0]; bestVal = pctv; if (pctv === 100) App.unlock('perfect');
         }
@@ -488,11 +496,11 @@
   function reviewList(answers) {
     return `<div class="card"><h3>Answer review</h3>${answers.map((a, i) => {
       const q = Q[a.id]; if (!q) return '';
-      const none = a.oi === -1 || (Array.isArray(a.oi) && !a.oi.length);
-      const pill = a.ok === null ? '<span class="pill">📝</span>' : `<span class="pill ${a.ok ? 'good' : 'bad'}">${a.ok ? '✓' : '✗'}</span>`;
+      const none = !a.sk && (a.oi === -1 || (Array.isArray(a.oi) && !a.oi.length));
+      const pill = a.sk ? '<span class="pill skip">⏭</span>' : a.ok === null ? '<span class="pill">📝</span>' : `<span class="pill ${a.ok ? 'good' : 'bad'}">${a.ok ? '✓' : '✗'}</span>`;
       return `<details class="q-prev ${a.ok === false ? 'open-bad' : ''}" ${a.ok === false ? 'open' : ''}><summary>${pill}<span class="qn">${i + 1}</span><span class="grow">${q.s || strip(q.g || '')}</span></summary>
-        ${stemHTML(q)}${optsPrev(q, none ? null : a.oi)}
-        ${none ? '<div class="muted small">⏰ Not answered</div>' : ''}${a.ok === null ? '<div class="muted small">Practice question — no key printed in the book.</div>' : ''}
+        ${stemHTML(q)}${optsPrev(q, none || a.sk ? null : a.oi)}
+        ${none ? '<div class="muted small">⏰ Not answered</div>' : ''}${a.sk ? '<div class="muted small">Skipped by you.</div>' : a.ok === null ? '<div class="muted small">Practice question — no key printed in the book.</div>' : ''}
         <div class="src">${chTitle(q.ch)} · Q${q.n}</div>${refLine(q)}${noteLine(q)}${bookExpHTML(q)}<div class="xp" data-q="${a.id}"></div></details>`;
     }).join('')}</div>`;
   }
@@ -621,8 +629,8 @@
       view().innerHTML = `<div class="play learn">
         <div class="play-top"><button class="icon-btn" id="quit">✕</button><div class="grow"><b>Learn · ${chTitle(key)}</b><div class="muted small">${ch.ids.length} questions</div></div>
         <label class="switch-row compact"><span>Cover answers</span><input type="checkbox" id="cov" ${cover ? 'checked' : ''}><i class="switch"></i></label></div>
-        <div class="learn-grid">${ch.ids.map(id => { const q = Q[id]; return `<article class="card learn-q ${cover ? 'covered' : ''}" data-id="${id}">
-          <div class="q-meta"><span class="tag">Q${q.n}</span>${Store.keyed(id) ? `<span class="tag t${Store.tier(id)}">${Store.TIERS[Store.tier(id)]}</span>` : '<span class="tag">Practice</span>'}<button class="star ${S().flags[id] ? 'on' : ''}" data-star="${id}">${S().flags[id] ? '★' : '☆'}</button></div>
+        <div class="learn-grid">${ch.ids.map(id => { const q = Q[id]; return `<article class="card learn-q ${cover ? 'covered' : ''} ${Store.isSkipped(id) ? 'skipped' : ''}" data-id="${id}">
+          <div class="q-meta"><span class="tag">Q${q.n}</span>${Store.keyed(id) ? `<span class="tag t${Store.tier(id)}">${Store.TIERS[Store.tier(id)]}</span>` : '<span class="tag">Practice</span>'}<button class="skipbtn ${Store.isSkipped(id) ? 'on' : ''}" data-skip="${id}" title="Skip / un-skip this question">${Store.isSkipped(id) ? '⏭ Skipped' : '⏭'}</button><button class="star ${Store.isFlagged(id) ? 'on' : ''}" data-star="${id}">${Store.isFlagged(id) ? '★' : '☆'}</button></div>
           ${stemHTML(q)}
           ${optsPrev(q)}
           ${cover ? '<button class="chip reveal-one">👁 Reveal answer</button>' : ''}
@@ -632,6 +640,7 @@
       $('#cov').onchange = e => { cover = e.target.checked; draw(); Resume.save(); };
       $$('.reveal-one').forEach(b => b.onclick = () => { b.closest('.learn-q').classList.remove('covered'); b.remove(); FX.play('flip'); });
       $$('[data-star]').forEach(b => b.onclick = () => { const on = Store.toggleFlag(b.dataset.star); b.textContent = on ? '★' : '☆'; b.classList.toggle('on', on); });
+      $$('[data-skip]').forEach(b => b.onclick = () => { const on = Store.toggleSkip(b.dataset.skip); b.textContent = on ? '⏭ Skipped' : '⏭'; b.classList.toggle('on', on); b.closest('.learn-q').classList.toggle('skipped', on); FX.play('tap'); });
       $('#toCh').onclick = () => start('challenge', { chapters: [key] });
       bindNextChapter({ chapters: [key], modeId: 'learn' });
       Explain.scan(view());
@@ -657,7 +666,7 @@
       view().innerHTML = `<div class="play flash">
         <div class="play-top"><button class="icon-btn" id="quit">✕</button><div class="grow"><div class="row between small"><b>Flashcards</b><span class="muted">${done} done · ${queue.length} left</span></div><div class="prog"><i style="width:${done / (done + queue.length) * 100}%"></i></div></div></div>
         <div class="fc-stage"><div class="fc" id="fc" tabindex="0">
-          <div class="fc-face fc-front"><div class="q-meta"><span class="tag">${esc(qLabel(q))}</span><span class="tag t${Store.tier(id)}">${Store.TIERS[Store.tier(id)]}</span></div>${stemHTML(q, { noCredit: true })}<div class="fc-hint">Recall the answer, then tap to flip ↻</div></div>
+          <div class="fc-face fc-front"><div class="q-meta"><span class="tag">${esc(qLabel(q))}</span><span class="tag t${Store.tier(id)}">${Store.TIERS[Store.tier(id)]}</span><button class="skipbtn" id="fcSkip" title="Skip this question from now on">⏭</button></div>${stemHTML(q, { noCredit: true })}<div class="fc-hint">Recall the answer, then tap to flip ↻</div></div>
           <div class="fc-face fc-back"><div class="muted small">Answer${ans.length > 1 ? 's' : ''}</div><div class="fc-ans">${ans.map(i => (q.lab ? '' : `<b>${L(i)}.</b> `) + optText(q, i)).join('<br>')}</div><div class="fc-key">Book key: ${keyText(q)}</div>${refLine(q)}${noteLine(q)}
             <details class="fc-all"><summary>All options</summary>${optsPrev(q)}</details></div>
         </div></div>
@@ -666,7 +675,8 @@
         <div class="fc-xp hidden" id="fcx">${bookExpHTML(q)}<div class="xp" id="xp"></div></div></div>`;
       $('#quit').onclick = () => App.go(backHash(cfg));
       const fc = $('#fc');
-      fc.onclick = e => { if (e.target.closest('details,.qimg')) return; flip(); };
+      fc.onclick = e => { if (e.target.closest('details,.qimg,#fcSkip')) return; flip(); };
+      $('#fcSkip').onclick = e => { e.stopPropagation(); Store.setSkip(id, true); queue.shift(); toast('⏭ Skipped — un-skip it from the chapter or book page.'); Resume.save(); draw(); };
       $$('#rate [data-g]').forEach(b => b.onclick = () => rate(+b.dataset.g));
       swipe(fc);
     }

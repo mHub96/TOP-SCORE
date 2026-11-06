@@ -11,3 +11,8 @@ Greenberg-Verification-Report.md
 # Multi-book pack build (contains book content) — keep local only
 books-build/
 Books/
+
+# Cloudflare credentials (sync service) — never commit
+cloudflare-token.txt
+.cf-login/
+sync-worker/.wrangler/

@@ -374,6 +374,7 @@
         </div>
       </section>
       ${chapterResumeList(b.id, 3)}
+      ${st.skipped ? `<section class="card skip-card"><div class="grow"><b>⏭ ${st.skipped} skipped question${st.skipped > 1 ? 's' : ''}</b><div class="muted small">Left out of every mode and of this book's progress. Un-skip one from its chapter, or all at once here.</div></div><button class="btn ghost sm" id="clrSkips">Clear all skips</button></section>` : ''}
       ${weak.length ? `<section class="card"><h2>🎯 Focus next</h2>${weak.map(w => `<a class="list-item" href="#/ch/${encodeURIComponent(w.key)}"><span class="num">${CH[w.key].n}</span><span class="grow">${esc(strip(CH[w.key].t))}<br><small class="muted">${w.acc === null ? 'not started' : pct(w.acc) + ' accuracy'} · ${pct(w.mastery)} mastery</small></span><span class="chev">›</span></a>`).join('')}</section>` : ''}
       <div class="page-head"><div class="row between"><h2>Chapters</h2><span class="muted small">${keys.length} chapters</span></div>
       <input class="search" id="chFilter" placeholder="Filter chapters…" autocomplete="off"></div>
@@ -383,6 +384,11 @@
         <div class="ch-grid">${ks.map(k => chCard(k)).join('')}</div></section>`;
       }).join('')}</div>`;
     $$('[data-bgo]').forEach(x => x.onclick = () => Modes.setup(x.dataset.bgo));
+    if ($('#clrSkips')) $('#clrSkips').onclick = async () => {
+      if (await confirmBox('Clear all skips in this book?', `${st.skipped} question${st.skipped > 1 ? 's' : ''} will be asked again in every mode.`, 'Clear skips')) {
+        const n = Store.clearSkips(Store.BK[b.id].ids); toast(`⏭ ${n} question${n === 1 ? '' : 's'} un-skipped`); render();
+      }
+    };
     $('#chFilter').oninput = e => {
       const q = e.target.value.toLowerCase().trim();
       $$('.ch-card').forEach(c => c.style.display = !q || c.dataset.t.includes(q) ? '' : 'none');
@@ -396,7 +402,7 @@
       ${ring(cs.done, 50, 5, pct(cs.done))}
       <div class="grow"><div class="ch-t"><span class="num">${c.n}</span>${c.t}</div>
       <div class="muted small">${cs.total} MCQs${cs.practice ? ' +' + cs.practice + ' practice' : ''} · ${cs.seen} seen${cs.acc !== null ? ' · ' + pct(cs.acc) + ' acc' : ''} · mastery ${pct(cs.mastery)}${cs.due ? ` · <span class="pill warn">${cs.due} due</span>` : ''}</div>
-      ${pbar(cs, 'thin')}${chip ? `<div class="mt-s">${chip}</div>` : ''}</div><span class="chev">›</span></a>`;
+      ${pbar(cs, 'thin')}${chip || cs.skipped ? `<div class="mt-s">${chip}${cs.skipped ? ` <span class="pill skip">⏭ ${cs.skipped} skipped</span>` : ''}</div>` : ''}</div><span class="chev">›</span></a>`;
   }
 
   // ---------- chapter page ----------
@@ -433,12 +439,15 @@
       <h2 class="sec-h">Study this chapter</h2>
       <div class="mode-grid">${Modes.list.filter(m => m.chapter !== false).map(m => `
         <button class="mode card" data-mode="${m.id}" style="--h:${m.hue}"><span class="m-ic">${m.ic}</span><b>${m.name}</b><small>${m.short}</small></button>`).join('')}</div>
-      <h2 class="sec-h">Questions <span class="muted small">(tap to preview)</span></h2>
+      <h2 class="sec-h">Questions <span class="muted small">(tap to preview · ⏭ to skip / un-skip)</span>${cs.skipped ? ` <button class="chip" id="clrChSkips">Un-skip all ${cs.skipped} here</button>` : ''}</h2>
       <div class="q-list">${ch.ids.map(id => { const q = Q[id], t = Store.tier(id); return `
-        <details class="q-prev"><summary><span class="tdot t${t}" title="${Store.TIERS[t]}"></span><span class="qn">Q${q.n}</span><span class="grow">${q.g && !q.s ? strip(q.g) : q.s}${q.img ? ' 🖼️' : ''}</span>${S().flags[id] ? '⭐' : ''}</summary>
+        <details class="q-prev"><summary><span class="tdot t${t}" title="${Store.TIERS[t]}"></span><span class="qn">Q${q.n}</span><span class="grow">${q.g && !q.s ? strip(q.g) : q.s}${q.img ? ' 🖼️' : ''}</span>${Store.isFlagged(id) ? '⭐' : ''}${Store.isSkipped(id) ? ' <span class="pill skip">⏭ skipped</span>' : ''}</summary>
+        <div class="row end"><button class="skipbtn ${Store.isSkipped(id) ? 'on' : ''}" data-skip="${id}">${Store.isSkipped(id) ? '⏭ Skipped — tap to un-skip' : '⏭ Skip this question'}</button></div>
         ${stemHTML(q)}${optsPrev(q)}
         ${refLine(q)}${noteLine(q)}${bookExpHTML(q)}<div class="xp" data-q="${id}"></div></details>`; }).join('')}</div>`;
     $$('[data-mode]').forEach(x => x.onclick = () => Modes.start(x.dataset.mode, { chapters: [key], fromChapter: key }));
+    $$('[data-skip]').forEach(x => x.onclick = e => { e.preventDefault(); const on = Store.toggleSkip(x.dataset.skip); x.classList.toggle('on', on); x.textContent = on ? '⏭ Skipped — tap to un-skip' : '⏭ Skip this question'; FX.play('tap'); });
+    if ($('#clrChSkips')) $('#clrChSkips').onclick = () => { const n = Store.clearSkips(ch.ids); toast(`⏭ ${n} un-skipped`); render(); };
     Explain.scan(view());
   };
 
@@ -593,6 +602,17 @@
     const packs = Books.list().filter(b => !b.builtin);
     view().innerHTML = `
       <div class="page-head"><h1>Settings</h1></div>
+      <section class="card sync-card" id="syncCard">
+        <h2>☁️ Sync across your devices</h2>
+        <p class="muted small">Your progress is saved automatically online under your personal code. To continue on another phone, tablet or computer, open TOP SCORE there and enter this code below — every linked device then shares and updates the same progress. Keep the code private: anyone who has it can see and change this progress.</p>
+        <div class="sync-code"><code id="syCode">…</code><button class="btn sm" id="syCopy">📋 Copy</button></div>
+        <div class="kv"><span>Status</span><b id="syState">…</b></div>
+        <div class="row gap wrap mt"><button class="btn ghost sm" id="syNow">🔄 Sync now</button></div>
+        <details class="sy-link"><summary>Use the code from another device</summary>
+          <p class="muted small">Enter the code shown in Settings on the device you used before. Progress on this device is combined with it (nothing is lost) and this device then uses that code.</p>
+          <div class="row gap wrap"><input class="search sm" id="syIn" placeholder="TS-XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false"><button class="btn sm" id="syLink">Link this device</button></div>
+        </details>
+      </section>
       <section class="card">
         <h2>💾 Backup &amp; restore</h2>
         <p class="muted small">Your progress is saved <b>only in this browser</b> (${kb} KB). Clearing site data, private mode or reinstalling the browser can erase it. Export a backup regularly to your phone's Files / Drive and restore it here to resume exactly where you left off. The backup holds progress for <b>every book</b> (not the book files themselves).</p>
@@ -622,6 +642,7 @@
       </section>
       <section class="card">
         <h2>🎛️ Experience</h2>
+        <div class="field"><span>Text size</span><div class="seg" id="fontSz">${[[0.9, 'Small'], [1, 'Normal'], [1.12, 'Large'], [1.25, 'Larger'], [1.4, 'Largest']].map(f => `<button data-v="${f[0]}" class="${(set.fontScale || 1) === f[0] ? 'on' : ''}" style="font-size:${f[0]}em">${f[1]}</button>`).join('')}</div></div>
         <div class="field"><span>Theme</span><div class="seg" id="theme">${['auto', 'light', 'dark'].map(t => `<button data-v="${t}" class="${set.theme === t ? 'on' : ''}">${t === 'auto' ? '🌗 Auto' : t === 'light' ? '☀️ Light' : '🌙 Dark'}</button>`).join('')}</div></div>
         ${toggle('sound', '🔊 Sound effects', set.sound)}
         ${toggle('haptics', '📳 Vibration feedback', set.haptics)}
@@ -651,6 +672,8 @@
     $('#nm').onchange = e => { set.name = e.target.value.trim(); Store.save(); };
     $('#goal').oninput = e => { set.goal = +e.target.value; $('#gv').textContent = set.goal; Store.save(); };
     $('#exs').oninput = e => { set.examSecs = +e.target.value; $('#ev').textContent = set.examSecs; Store.save(); };
+    $$('#fontSz button').forEach(b => b.onclick = () => { set.fontScale = +b.dataset.v; Store.save(); applyTheme(); $$('#fontSz button').forEach(x => x.classList.toggle('on', x === b)); });
+    syncUI();
     $$('#theme button').forEach(b => b.onclick = () => { set.theme = b.dataset.v; Store.save(); applyTheme(); $$('#theme button').forEach(x => x.classList.toggle('on', x === b)); });
     $$('[data-tg]').forEach(i => i.onchange = () => { set[i.dataset.tg] = i.checked; Store.save(); FX.play('tap'); });
     $('#inst').onclick = async () => { if (App.installEvt) { App.installEvt.prompt(); await App.installEvt.userChoice; App.installEvt = null; $('#inst').disabled = true; } };
@@ -660,6 +683,27 @@
     if (navigator.storage && navigator.storage.persisted) navigator.storage.persisted().then(p => $('#persist').textContent = p ? 'Granted ✅' : 'Not granted (backup advised)');
     else $('#persist').textContent = 'Unsupported';
   };
+  function syncUI() {
+    const draw = i => {
+      if (!$('#syCode')) return;
+      $('#syCode').textContent = i.code || '—';
+      $('#syState').textContent = i.state === 'syncing' ? 'Syncing…' : i.error ? '⚠️ ' + i.error : i.at ? `✅ Synced ${ago(i.at)}` : 'Not synced yet';
+    };
+    draw(Sync.info()); Sync.onChange(draw);
+    $('#syCopy').onclick = async () => {
+      const c = Sync.info().code;
+      try { await navigator.clipboard.writeText(c); toast('📋 Code copied'); } catch (e) { prompt('Copy your code:', c); }
+    };
+    $('#syNow').onclick = async () => { const ok = await Sync.sync('manual'); toast(ok ? '☁️ Progress synced' : '⚠️ ' + (Sync.info().error || 'Sync failed')); };
+    $('#syIn').oninput = e => { e.target.value = e.target.value.toUpperCase(); };
+    $('#syLink').onclick = async () => {
+      const v = $('#syIn').value.trim(); if (!v) return;
+      if (!await confirmBox('Link this device?', `This device's progress will be combined with the progress saved under <b>${esc(Sync.norm(v))}</b>, and both devices will then share it.`, 'Link')) return;
+      $('#syLink').disabled = true;
+      try { await Sync.link(v); toast('☁️ Linked — this device now shares that progress'); FX.play('win'); render(); }
+      catch (e) { toast('⚠️ ' + esc(e.message), 4500); $('#syLink').disabled = false; }
+    };
+  }
   async function packUI() {
     await Explain.ready;
     const i = Explain.info(), st = $('#xpStatus'); if (!st) return;
@@ -751,6 +795,7 @@
     }, 500);
   }
   function applyTheme() {
+    document.documentElement.style.setProperty('--fs', S().settings.fontScale || 1);
     const t = S().settings.theme;
     if (t === 'auto') document.documentElement.removeAttribute('data-theme');
     else document.documentElement.setAttribute('data-theme', t);
@@ -779,6 +824,7 @@
     await Books.ready;
     Store.syncBooks();
     render();
+    Sync.start();
     // request persistent storage on first interaction (reduces chance of eviction)
     const askPersist = () => { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); removeEventListener('pointerdown', askPersist); };
     addEventListener('pointerdown', askPersist);

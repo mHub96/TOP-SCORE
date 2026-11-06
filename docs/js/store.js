@@ -51,8 +51,8 @@
   function fresh() {
     return {
       v: 1, created: Date.now(),
-      settings: { name: '', goal: 40, theme: 'auto', sound: true, haptics: true, recallFirst: false, shuffleOpts: false, examSecs: 72 },
-      cards: {}, log: [], daily: {}, xp: 0, ach: {}, flags: {}, sessions: [], best: {},
+      settings: { name: '', goal: 40, theme: 'auto', sound: true, haptics: true, recallFirst: false, shuffleOpts: false, examSecs: 72, fontScale: 1 },
+      cards: {}, log: [], daily: {}, xp: 0, ach: {}, flags: {}, skips: {}, sessions: [], best: {},
       lastBackup: 0, sinceBackup: 0, backupNag: 0
     };
   }
@@ -73,6 +73,7 @@
       }
     };
     if (now) run(); else saveTimer = setTimeout(run, 400);
+    if (window.__onSave) window.__onSave();   // cross-device sync hook
   }
   window.addEventListener('pagehide', () => save(true));
   document.addEventListener('visibilitychange', () => { if (document.hidden) save(true); });
@@ -100,14 +101,16 @@
     return { tiers: t, due, total: ids.length, seen: ids.length - t[0], mastery, acc: c + w ? c / (c + w) : null, done: (ids.length - t[0]) / n };
   }
   // chapter/book stats count only keyed questions (practice-only items have no key to score)
-  function chapterStats(key) { const ch = CH[key]; if (!ch) return statsOf([]); const s = statsOf(ch.keyed); s.practice = ch.ids.length - ch.keyed.length; return s; }
-  function bookStats(bid) { const b = BK[bid]; if (!b) return statsOf([]); const s = statsOf(b.keyed); s.practice = b.ids.length - b.keyed.length; s.chapters = b.chs.length; return s; }
+  // skipped questions are left out of progress, stats and every study mode until un-skipped
+  const live = ids => ids.filter(id => !isSkipped(id));
+  function chapterStats(key) { const ch = CH[key]; if (!ch) return statsOf([]); const s = statsOf(live(ch.keyed)); s.practice = live(ch.ids).length - live(ch.keyed).length; s.skipped = ch.ids.filter(isSkipped).length; return s; }
+  function bookStats(bid) { const b = BK[bid]; if (!b) return statsOf([]); const s = statsOf(live(b.keyed)); s.practice = live(b.ids).length - live(b.keyed).length; s.chapters = b.chs.length; s.skipped = b.ids.filter(isSkipped).length; return s; }
   function globalTiers(ids) {
     const t = [0, 0, 0, 0, 0];
     (ids || allKeyed()).forEach(id => t[tier(id)]++);
     return t;
   }
-  const allKeyed = () => ALL.filter(keyed);
+  const allKeyed = () => ALL.filter(id => keyed(id) && !isSkipped(id));
   const dueIds = (ids = ALL) => { const now = Date.now(); return ids.filter(id => S.cards[id] && S.cards[id].reps && S.cards[id].due <= now); };
   // last time the user answered anything in a book (for shelf ordering / "recent")
   function lastTouched(bid) {
@@ -186,7 +189,39 @@
     if (!S.best[key] || val > S.best[key]) { S.best[key] = val; save(); return true; }
     return false;
   }
-  function toggleFlag(id) { if (S.flags[id]) delete S.flags[id]; else S.flags[id] = Date.now(); save(); return !!S.flags[id]; }
+  // stars and skips: value > 0 = set at that time, < 0 = removed at that time (kept so removals sync between devices)
+  const isFlagged = id => (S.flags[id] || 0) > 0;
+  function isSkipped(id) { return ((S.skips || {})[id] || 0) > 0; }
+  function toggleFlag(id) { const on = !isFlagged(id); S.flags[id] = on ? Date.now() : -Date.now(); save(); return on; }
+  function setSkip(id, on) { S.skips = S.skips || {}; S.skips[id] = on ? Date.now() : -Date.now(); save(); return on; }
+  function toggleSkip(id) { return setSkip(id, !isSkipped(id)); }
+  function clearSkips(ids) { let n = 0; ids.forEach(id => { if (isSkipped(id)) { S.skips[id] = -Date.now(); n++; } }); save(); return n; }
+  const mergeStamp = (a = {}, b = {}) => { for (const k in b) if (!a[k] || Math.abs(b[k]) > Math.abs(a[k])) a[k] = b[k]; return a; };
+
+  /* merge another copy of the progress (other device / backup) into this one; nothing is lost */
+  function mergeState(st, opts = {}) {
+    for (const id in st.cards || {}) {
+      const a = S.cards[id], b = st.cards[id];
+      if (!a || (b.last || 0) > (a.last || 0)) S.cards[id] = b;
+    }
+    for (const d in st.daily || {}) {
+      const a = S.daily[d], b = st.daily[d];
+      if (!a || b.a > a.a) S.daily[d] = b;
+    }
+    const seen = new Set(S.log.map(l => l[0] + l[1]));
+    (st.log || []).forEach(l => { if (!seen.has(l[0] + l[1])) S.log.push(l); });
+    S.log.sort((x, y) => x[0] - y[0]);
+    if (S.log.length > 60000) S.log.splice(0, S.log.length - 60000);
+    S.xp = opts.xp !== undefined ? opts.xp : Math.max(S.xp, st.xp || 0);
+    Object.assign(S.ach, st.ach || {});
+    S.flags = mergeStamp(S.flags, st.flags || {});
+    S.skips = mergeStamp(S.skips || {}, st.skips || {});
+    for (const k in (st.best || {})) if (!S.best[k] || st.best[k] > S.best[k]) S.best[k] = st.best[k];
+    const ss = new Set(S.sessions.map(x => x.ts));
+    S.sessions = S.sessions.concat((st.sessions || []).filter(x => !ss.has(x.ts))).sort((a, b) => a.ts - b.ts).slice(-800);
+    if (st.lastBackup > S.lastBackup) S.lastBackup = st.lastBackup;
+    save(true);
+  }
 
   // ---- backup ----
   function exportData() {
@@ -199,21 +234,7 @@
     const st = j.state || j;
     if (!st || typeof st.cards !== 'object') throw new Error('This file is not a TOP SCORE backup.');
     if (mode === 'merge') {
-      for (const id in st.cards) {
-        const a = S.cards[id], b = st.cards[id];
-        if (!a || (b.last || 0) > (a.last || 0)) S.cards[id] = b;
-      }
-      for (const d in st.daily) {
-        const a = S.daily[d], b = st.daily[d];
-        if (!a || b.a > a.a) S.daily[d] = b;
-      }
-      const seen = new Set(S.log.map(l => l[0] + l[1]));
-      st.log.forEach(l => { if (!seen.has(l[0] + l[1])) S.log.push(l); });
-      S.log.sort((x, y) => x[0] - y[0]);
-      S.xp = Math.max(S.xp, st.xp || 0);
-      Object.assign(S.ach, st.ach || {}); Object.assign(S.flags, st.flags || {});
-      for (const k in (st.best || {})) setBest(k, st.best[k]);
-      S.sessions = S.sessions.concat(st.sessions || []).sort((a, b) => a.ts - b.ts).slice(-800);
+      mergeState(st);
     } else {
       S = Object.assign(fresh(), st);
       S.settings = Object.assign(fresh().settings, st.settings);
@@ -236,6 +257,6 @@
     get S() { return S; }, set S(v) { S = v; },
     Q, CH, ALL, BK, TIERS, RANKS, chKey, indexBook, unindexBook, syncBooks, keyed, isKeyed, answers, multi, allKeyed,
     today, tier, statsOf, chapterStats, bookStats, globalTiers, dueIds, lastTouched, levelInfo, addXP, answer, rate,
-    streak, bestStreak, session, setBest, toggleFlag, exportData, importData, reset, save, day, storageBytes
+    streak, bestStreak, session, setBest, toggleFlag, isFlagged, isSkipped, setSkip, toggleSkip, clearSkips, mergeState, exportData, importData, reset, save, day, storageBytes
   };
 })();
