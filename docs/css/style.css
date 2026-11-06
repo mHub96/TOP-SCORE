@@ -697,3 +697,13 @@ mark { background: color-mix(in srgb, var(--accent2) 30%, transparent); color: i
   .nav a { padding: 6px 0; font-size: .66rem; }
   .nav { gap: 2px; padding-top: 56px; }
 }
+
+/* real book covers */
+.book-tile .cover.has-img { padding: 0; background: #fff; }
+.book-tile .cover.has-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.book-tile .cover.has-img .spine { z-index: 1; }
+.book-tile .cover.has-img .b-due { z-index: 2; top: auto; bottom: 10px; left: auto; right: 10px; background: rgba(0, 0, 0, .6); color: #fff; }
+.b-name { font-size: .86rem; margin-top: -2px; }
+.book-tile .cover:not(.has-img) + .b-name { display: none; }
+.bh-cover.has-img { background: #fff; overflow: hidden; padding: 0; }
+.bh-cover.has-img img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }

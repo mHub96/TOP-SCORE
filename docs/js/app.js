@@ -183,8 +183,10 @@
   function bookTile(b, i) {
     const st = Store.bookStats(b.id), cur = b.id === bookId();
     return `<a class="book-tile ${cur ? 'cur' : ''}" href="#/book/${b.id}" style="--bc:${b.color || '#6d4cff'};--d:${i * 70}ms">
-      <div class="cover"><span class="spine"></span><span class="b-ic">${b.icon || '📘'}</span><b class="b-t">${esc(b.short)}</b><small class="b-a">${esc(b.authors || '')}${b.year ? ' · ' + b.year : ''}</small>
-        ${st.due ? `<span class="b-due">${st.due} due</span>` : ''}</div>
+      ${(() => { const cv = Books.cover(b.id); return cv
+        ? `<div class="cover has-img"><img src="${cv}" alt="${esc(b.title)} cover" loading="lazy"><span class="spine"></span>${st.due ? `<span class="b-due">${st.due} due</span>` : ''}</div>`
+        : `<div class="cover"><span class="spine"></span><span class="b-ic">${b.icon || '📘'}</span><b class="b-t">${esc(b.short)}</b><small class="b-a">${esc(b.authors || '')}${b.year ? ' · ' + b.year : ''}</small>${st.due ? `<span class="b-due">${st.due} due</span>` : ''}</div>`; })()}
+      <div class="b-name"><b>${esc(b.short)}</b></div>
       <div class="b-info"><div class="row between small"><b>${pct(st.done)}</b><span class="muted">${st.seen}/${st.total}</span></div>${pbar(st)}
         <div class="muted small">${b.chapters.length} chapters · mastery ${pct(st.mastery)}</div></div></a>`;
   }
@@ -347,7 +349,7 @@
     view().innerHTML = `
       <a class="back" href="#/">‹ Bookshelf</a>
       <section class="card glow book-hero" style="--bc:${b.color || '#6d4cff'}">
-        <div class="bh-cover"><span class="b-ic">${b.icon || '📘'}</span></div>
+        ${Books.cover(b.id) ? `<div class="bh-cover has-img"><img src="${Books.cover(b.id)}" alt="${esc(b.title)} cover"></div>` : `<div class="bh-cover"><span class="b-ic">${b.icon || '📘'}</span></div>`}
         <div class="grow">
           <div class="eyebrow">${esc(b.authors || '')}${b.year ? ' · ' + b.year : ''}${b.builtin ? ' · built in' : ' · private pack'}</div>
           <h1>${esc(b.title)}</h1>

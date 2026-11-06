@@ -13,7 +13,7 @@
   const D = window.TS_DATA;
   const TS = {
     id: 'ts', builtin: true, title: 'Top Score for the Neurosurgery Board Examination', short: 'Top Score',
-    authors: 'Tarar et al.', year: 2025, color: '#6d4cff', icon: '🏆',
+    authors: 'Tarar et al.', year: 2025, color: '#6d4cff', icon: '🏆', coverSrc: 'icons/ts-cover.webp',
     source: D.source, parts: D.parts.slice(),
     chapters: D.chapters.map(c => ({ n: c.n, t: c.t, p: c.p, q: c.q })),
     greenberg: true
@@ -98,11 +98,19 @@
     if (!b.urls[name]) { const p = part(b.rec, 'img/' + name); if (!p) return ''; b.urls[name] = URL.createObjectURL(p); }
     return b.urls[name];
   }
+  /* the book's front cover image (null when the book has none) */
+  function cover(bid) {
+    const b = BOOKS[bid]; if (!b) return null;
+    if (b.coverSrc) return b.coverSrc;
+    if (!b.rec || !b.rec.header.files['cover.webp']) return null;
+    if (!b.urls['cover.webp']) b.urls['cover.webp'] = URL.createObjectURL(part(b.rec, 'cover.webp'));
+    return b.urls['cover.webp'];
+  }
   function current() { let c = null; try { c = localStorage.getItem(CUR_KEY); } catch (e) { } return c && BOOKS[c] ? c : 'ts'; }
   function setCurrent(id) { try { localStorage.setItem(CUR_KEY, id); } catch (e) { } }
 
   window.Books = {
-    ready, load, remove, url, current, setCurrent, readHeader,
+    ready, load, remove, url, cover, current, setCurrent, readHeader,
     get: id => BOOKS[id], list: () => ORDER.map(id => BOOKS[id]), all: BOOKS
   };
 })();
