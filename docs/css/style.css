@@ -705,7 +705,6 @@ mark { background: color-mix(in srgb, var(--accent2) 30%, transparent); color: i
 .book-tile .cover.has-img .spine { z-index: 1; }
 .book-tile .cover.has-img .b-due { z-index: 2; top: auto; bottom: 10px; left: auto; right: 10px; background: rgba(0, 0, 0, .6); color: #fff; }
 .b-name { font-size: .86rem; margin-top: -2px; }
-.book-tile .cover:not(.has-img) + .b-name { display: none; }
 .bh-cover.has-img { background: #fff; overflow: hidden; padding: 0; }
 .bh-cover.has-img img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
 
@@ -765,3 +764,11 @@ body.playing .site-foot { display: none; }
 .vs-score > div { display: flex; flex-direction: column; } .vs-score b { font-size: 2rem; } .vs-score span { font-size: 1.6rem; color: var(--muted); }
 .duel-final { text-align: center; margin-bottom: 12px; }
 @media (min-width: 900px), (orientation: landscape) and (min-width: 640px) { .site-foot { padding-left: 96px; } body.authing .site-foot { padding-left: 0; } }
+
+/* shelf alignment: every tile has the same structure (cover, one title line, one-line stats) so progress bars line up */
+.shelf { align-items: start; }
+.book-tile .b-name, .book-tile .b-info > .muted, .book-tile .b-info .row > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.book-tile .b-name { line-height: 1.35; min-height: 1.35em; }
+.book-tile .b-info .row { gap: 6px; }
+.book-tile .b-info .row > span { flex: none; }
+.book-tile .b-info .row > b { min-width: 0; }
