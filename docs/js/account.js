@@ -91,6 +91,7 @@
   // ---------- sign in / sign up ----------
   function showAuth(mode = 'login') {
     document.body.classList.add('authing');
+    requestAnimationFrame(() => document.documentElement.classList.remove('gate'));   // only the login panel is ever revealed
     const v = $('#view');
     const pre = sessionStorage.getItem('ts.relogin') || '';
     v.innerHTML = `<div class="auth-wrap"><div class="auth card glow">

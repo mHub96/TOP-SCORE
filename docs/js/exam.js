@@ -43,7 +43,7 @@
   // =====================================================================================
   function setup(prefill) {
     if (!Account.me()) return Account.showAuth();
-    const last = Object.assign({ cnt: 20, pace: 'timer', secs: 60, auto: true, guests: true }, JSON.parse(localStorage.getItem('ts.examcfg') || '{}'), prefill || {});
+    const last = Object.assign({ cnt: 20, pace: 'timer', secs: 60, auto: true, guests: false }, JSON.parse(localStorage.getItem('ts.examcfg') || '{}'), prefill || {});
     const books = Books.list();
     const v = $('#view');
     v.innerHTML = `<a class="back" href="#/arena/exam">‹ Arena</a>

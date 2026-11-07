@@ -10,6 +10,9 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="TOP SCORE">
+  <!-- login gate: nothing of the app is painted until the login check has decided (app.js / account.js lift it) -->
+  <style>html.gate .topbar, html.gate .nav, html.gate #view, html.gate .site-foot, html.gate #toasts { visibility: hidden !important; }</style>
+  <script>document.documentElement.classList.add('gate');</script>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">

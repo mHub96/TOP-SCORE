@@ -797,6 +797,12 @@
     };
     const guestExam = !Account.me() && location.hash.startsWith('#/x/');     // exam room: guests may enter with just a name
     if (!Account.me() && !guestExam) { Account.showAuth(); return; }   // private study group: log in first
+    // a saved login is checked with the server before anything is shown (offline: the saved login is trusted)
+    if (Account.me() && navigator.onLine) {
+      try { await Promise.race([Account.api('/me'), new Promise((_, no) => setTimeout(() => no(new Error('slow')), 6000))]); }
+      catch (e) { if (!Account.me()) return; }        // session ended / account blocked → login screen (page reloads)
+    }
+    document.documentElement.classList.remove('gate');
     view().innerHTML = '<div class="boot"><div class="intro-logo spin">📚</div><p class="muted">Opening your bookshelf…</p></div>';
     await Books.ready;
     Store.syncBooks();
