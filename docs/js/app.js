@@ -61,6 +61,7 @@
     const t = document.createElement('div'); t.className = 'toast'; t.innerHTML = msg;
     $('#toasts').appendChild(t); requestAnimationFrame(() => t.classList.add('on'));
     setTimeout(() => { t.classList.remove('on'); setTimeout(() => t.remove(), 400); }, ms);
+    return t;
   }
   function modal(html, opts = {}) {
     const m = document.createElement('div'); m.className = 'modal-wrap';
@@ -111,7 +112,7 @@
     }
     const segs = h.split('/').filter(Boolean), path = segs[0] || '', arg = segs.slice(1).join('/');
     const fn = routes[path || 'home'] || routes.home;
-    const navKey = path === 'ch' || path === 'chapters' ? 'book' : (path || 'home');
+    const navKey = path === 'ch' || path === 'chapters' ? 'book' : path === 'duel' ? 'arena' : (path || 'home');
     $$('.nav a').forEach(a => a.classList.toggle('on', a.dataset.r === navKey));
     document.body.classList.toggle('playing', path === 'play');
     const v = view();
@@ -602,17 +603,8 @@
     const packs = Books.list().filter(b => !b.builtin);
     view().innerHTML = `
       <div class="page-head"><h1>Settings</h1></div>
-      <section class="card sync-card" id="syncCard">
-        <h2>☁️ Sync across your devices</h2>
-        <p class="muted small">Your progress is saved automatically online under your personal code. To continue on another phone, tablet or computer, open TOP SCORE there and enter this code below — every linked device then shares and updates the same progress. Keep the code private: anyone who has it can see and change this progress.</p>
-        <div class="sync-code"><code id="syCode">…</code><button class="btn sm" id="syCopy">📋 Copy</button></div>
-        <div class="kv"><span>Status</span><b id="syState">…</b></div>
-        <div class="row gap wrap mt"><button class="btn ghost sm" id="syNow">🔄 Sync now</button></div>
-        <details class="sy-link"><summary>Use the code from another device</summary>
-          <p class="muted small">Enter the code shown in Settings on the device you used before. Progress on this device is combined with it (nothing is lost) and this device then uses that code.</p>
-          <div class="row gap wrap"><input class="search sm" id="syIn" placeholder="TS-XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false"><button class="btn sm" id="syLink">Link this device</button></div>
-        </details>
-      </section>
+      ${Account.settingsHTML()}
+      ${Account.libraryHTML()}
       <section class="card">
         <h2>💾 Backup &amp; restore</h2>
         <p class="muted small">Your progress is saved <b>only in this browser</b> (${kb} KB). Clearing site data, private mode or reinstalling the browser can erase it. Export a backup regularly to your phone's Files / Drive and restore it here to resume exactly where you left off. The backup holds progress for <b>every book</b> (not the book files themselves).</p>
@@ -657,6 +649,7 @@
       </section>
       <section class="card">
         <h2>ℹ️ About the data</h2>
+        <p class="small"><b>${Account.OWNER_CREDIT}</b></p>
         <p class="muted small">Every question, key and explanation comes strictly from its book — no outside content. Top Score: <i>${esc(Books.get('ts').source)}</i>; each key was verified by matching the printed answer letter against the printed answer text and cross-checked with two independent PDF extraction engines. Book packs were extracted the same way (key letter vs. printed answer text, or the book's own answer key table). Where a book is internally inconsistent the question shows an ℹ️ note; questions printed without any key are marked <b>practice</b> and are not scored.</p>
       </section>
       <section class="card danger-zone"><h2>⚠️ Danger zone</h2><button class="btn danger" id="rst">Reset all progress</button></section>`;
@@ -673,7 +666,7 @@
     $('#goal').oninput = e => { set.goal = +e.target.value; $('#gv').textContent = set.goal; Store.save(); };
     $('#exs').oninput = e => { set.examSecs = +e.target.value; $('#ev').textContent = set.examSecs; Store.save(); };
     $$('#fontSz button').forEach(b => b.onclick = () => { set.fontScale = +b.dataset.v; Store.save(); applyTheme(); $$('#fontSz button').forEach(x => x.classList.toggle('on', x === b)); });
-    syncUI();
+    Account.bindSettings(); Account.bindLibrary();
     $$('#theme button').forEach(b => b.onclick = () => { set.theme = b.dataset.v; Store.save(); applyTheme(); $$('#theme button').forEach(x => x.classList.toggle('on', x === b)); });
     $$('[data-tg]').forEach(i => i.onchange = () => { set[i.dataset.tg] = i.checked; Store.save(); FX.play('tap'); });
     $('#inst').onclick = async () => { if (App.installEvt) { App.installEvt.prompt(); await App.installEvt.userChoice; App.installEvt = null; $('#inst').disabled = true; } };
@@ -683,27 +676,6 @@
     if (navigator.storage && navigator.storage.persisted) navigator.storage.persisted().then(p => $('#persist').textContent = p ? 'Granted ✅' : 'Not granted (backup advised)');
     else $('#persist').textContent = 'Unsupported';
   };
-  function syncUI() {
-    const draw = i => {
-      if (!$('#syCode')) return;
-      $('#syCode').textContent = i.code || '—';
-      $('#syState').textContent = i.state === 'syncing' ? 'Syncing…' : i.error ? '⚠️ ' + i.error : i.at ? `✅ Synced ${ago(i.at)}` : 'Not synced yet';
-    };
-    draw(Sync.info()); Sync.onChange(draw);
-    $('#syCopy').onclick = async () => {
-      const c = Sync.info().code;
-      try { await navigator.clipboard.writeText(c); toast('📋 Code copied'); } catch (e) { prompt('Copy your code:', c); }
-    };
-    $('#syNow').onclick = async () => { const ok = await Sync.sync('manual'); toast(ok ? '☁️ Progress synced' : '⚠️ ' + (Sync.info().error || 'Sync failed')); };
-    $('#syIn').oninput = e => { e.target.value = e.target.value.toUpperCase(); };
-    $('#syLink').onclick = async () => {
-      const v = $('#syIn').value.trim(); if (!v) return;
-      if (!await confirmBox('Link this device?', `This device's progress will be combined with the progress saved under <b>${esc(Sync.norm(v))}</b>, and both devices will then share it.`, 'Link')) return;
-      $('#syLink').disabled = true;
-      try { await Sync.link(v); toast('☁️ Linked — this device now shares that progress'); FX.play('win'); render(); }
-      catch (e) { toast('⚠️ ' + esc(e.message), 4500); $('#syLink').disabled = false; }
-    };
-  }
   async function packUI() {
     await Explain.ready;
     const i = Explain.info(), st = $('#xpStatus'); if (!st) return;
@@ -804,7 +776,7 @@
   }
 
   window.App = {
-    $, $$, esc, strip, shuffle, L, toast, modal, confirmBox, ring, animateRings, go, render, fmtMs, fmtIvl, chTitle, chShort, qLabel,
+    $, $$, esc, strip, shuffle, L, toast, ago, modal, confirmBox, ring, animateRings, go, render, fmtMs, fmtIvl, chTitle, chShort, qLabel,
     stemHTML, bookExpHTML, optsPrev, optText, keyText, keyLetters, correctSet, isRight, refLine, noteLine, book, bookId, chKeys,
     unlock, checkAch, levelUp, doExport, needBackup, installEvt: null, addPack,
     setLeaveGuard(fn) { leaveGuard = fn; }, routes, applyTheme
@@ -820,11 +792,13 @@
       const s = S().settings; const dark = document.documentElement.getAttribute('data-theme') === 'dark' || (!document.documentElement.getAttribute('data-theme') && matchMedia('(prefers-color-scheme: dark)').matches);
       s.theme = dark ? 'light' : 'dark'; Store.save(); applyTheme(); FX.play('tap');
     };
+    if (!Account.me()) { Account.showAuth(sessionStorage.getItem('ts.relogin') ? 'login' : 'login'); return; }   // private study group: log in first
     view().innerHTML = '<div class="boot"><div class="intro-logo spin">📚</div><p class="muted">Opening your bookshelf…</p></div>';
     await Books.ready;
     Store.syncBooks();
     render();
     Sync.start();
+    Account.start();
     // request persistent storage on first interaction (reduces chance of eviction)
     const askPersist = () => { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); removeEventListener('pointerdown', askPersist); };
     addEventListener('pointerdown', askPersist);

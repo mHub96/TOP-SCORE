@@ -3,7 +3,11 @@
    Ids: Top Score "ch-n" (unchanged from v1, so old progress keeps working); pack books "book:ch-k".
    Chapter keys: Top Score "n"; pack books "book:n". */
 (function () {
-  const KEY = 'topscore.v1';
+  // every account has its own progress on a shared device
+  let ACCT = null; try { ACCT = JSON.parse(localStorage.getItem('topscore.acct')); } catch (e) { }
+  const NS = ACCT && ACCT.id ? '.u' + ACCT.id : '';
+  window.TS_NS = NS;
+  const KEY = 'topscore.v1' + NS, CHR = 'topscore.chresume' + NS;
   const DAY = 86400000;
 
   // ---- question index (all books) ----
@@ -226,7 +230,7 @@
   // ---- backup ----
   function exportData() {
     S.lastBackup = Date.now(); S.sinceBackup = 0; save(true);
-    let chr = null; try { chr = JSON.parse(localStorage.getItem('topscore.chresume') || 'null'); } catch (e) { }
+    let chr = null; try { chr = JSON.parse(localStorage.getItem(CHR) || 'null'); } catch (e) { }
     return JSON.stringify({ app: 'TOP SCORE', format: 1, exported: new Date().toISOString(), state: S, chresume: chr });
   }
   function importData(text, mode = 'replace') {
@@ -242,15 +246,15 @@
     }
     if (j.chresume && typeof j.chresume === 'object') {
       try {
-        const cur = mode === 'merge' ? (JSON.parse(localStorage.getItem('topscore.chresume') || '{}') || {}) : {};
+        const cur = mode === 'merge' ? (JSON.parse(localStorage.getItem(CHR) || '{}') || {}) : {};
         for (const k in j.chresume) if (!cur[k] || (j.chresume[k].ts || 0) > (cur[k].ts || 0)) cur[k] = j.chresume[k];
-        localStorage.setItem('topscore.chresume', JSON.stringify(cur));
+        localStorage.setItem(CHR, JSON.stringify(cur));
       } catch (e) { }
     }
     S.lastBackup = Date.now(); S.sinceBackup = 0;
     save(true);
   }
-  function reset() { S = fresh(); Store.S = S; try { localStorage.removeItem('topscore.chresume'); } catch (e) { } save(true); }
+  function reset() { S = fresh(); Store.S = S; try { localStorage.removeItem(CHR); } catch (e) { } save(true); }
   function storageBytes() { try { return (localStorage.getItem(KEY) || '').length * 2; } catch (e) { return 0; } }
 
   window.Store = {

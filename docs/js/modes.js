@@ -30,7 +30,7 @@
   let SID = 0;
 
   // ---------- resume: last session + one saved session per chapter ----------
-  const RKEY = 'topscore.resume', CKEY = 'topscore.chresume';
+  const RKEY = 'topscore.resume' + (window.TS_NS || ''), CKEY = 'topscore.chresume' + (window.TS_NS || '');
   let snapFn = null, scrollT = null, curChKey = null;
   const readCh = () => { try { return JSON.parse(localStorage.getItem(CKEY) || '{}') || {}; } catch (e) { return {}; } };
   const writeCh = o => { try { localStorage.setItem(CKEY, JSON.stringify(o)); } catch (e) { } };
@@ -227,7 +227,8 @@
       Object.assign(R, saved.R); pool = saved.pool; R.t0 = Date.now() - (saved.el || 0); R.done = false;
       if (cfg.timeLimit) deadline = Date.now() + Math.max(1000, saved.left || 0);
     }
-    Resume.track(() => R.done ? null : {
+    if (cfg.duel) Resume.clear();     // a live challenge cannot be resumed later
+    Resume.track(() => R.done || cfg.duel ? null : {
       kind: 'quiz', label: cfg.title + ' · ' + cfg.scope, cfg,
       prog: endless ? `${R.correct} correct · ${R.wrong} wrong` : `${R.i} of ${total} answered`,
       st: { R: Object.assign({}, R), pool, left: deadline ? deadline - Date.now() : 0, el: Date.now() - R.t0 }
@@ -244,6 +245,7 @@
             </div>
             <div class="hud" id="hud"></div>
           </div>
+          ${cfg.duel ? `<div class="duel-hud card" id="duelHud"><span>⚔️ <b>${esc(cfg.duel.opp)}</b></span><span class="muted small" id="duelOpp">waiting…</span></div>` : ''}
           ${cfg.boss ? `<div class="boss card" id="boss"><div class="boss-ic" id="bossIc">${R.bossIc}</div><div class="grow"><b>${esc(R.bossName)}</b><div class="hpbar boss-hp"><i id="bossHp"></i></div><div class="row between small"><span id="you"></span><span class="muted" id="bossTxt"></span></div></div></div>` : ''}
           <div id="qbox"></div>
         </div>`;
@@ -270,7 +272,7 @@
       locked = false;
       if (!$('#qbox')) return;
       if (cfg.timeLimit && Date.now() >= deadline) return finish();
-      if (endless && R.i >= pool.length) pool = pool.concat(shuffle(cfg.ids));
+      if (endless && R.i >= pool.length) pool = pool.concat(cfg.duel ? cfg.ids : shuffle(cfg.ids));   // duel: same order for both players
       if (!endless && R.i >= total) return finish();
       const id = pool[R.i]; const q = Q[id];
       if (!q) { R.i++; return next(); }
@@ -363,6 +365,7 @@
       }
       if (conf) R.cbm += ok ? [0, 1, 2, 3][conf] : [0, 0, -2, -6][conf];
       Resume.save();
+      if (cfg.duel) duelSend(false);
       const fxEl = btn || $('.opt');
       if (gain) { R.xp += gain; Store.addXP(gain); FX.floatText(fxEl, '+' + gain + ' XP'); }
       $$('.opt').forEach(b => { b.disabled = true; if (isRight(q, +b.dataset.oi)) b.classList.add('right'); else if (Array.isArray(oi) && picks.includes(+b.dataset.oi)) b.classList.add('wrong'); });
@@ -385,6 +388,21 @@
       Explain.mount($('#xp'), id, { open: !ok });
       $('#nextBtn').focus({ preventScroll: true });
       $('#fb').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    // ----- live challenge: send my score, show the opponent's -----
+    let duelLast = 0;
+    function duelShow(c) {
+      if (!c) return;
+      const o = c[cfg.duel.side === 'from' ? 'to' : 'from'];
+      const el = $('#duelOpp'); if (el) el.innerHTML = `${o.done ? '🏁 finished · ' : ''}score <b>${o.score}</b> · ${o.correct}/${o.answered} correct`;
+    }
+    function duelSend(done) { duelLast = Date.now(); return Account.Duel.report(cfg.duel.c, cfg.duel.side, R, done).then(c => { duelShow(c); return c; }); }
+    if (cfg.duel) {
+      const dt = setInterval(() => {
+        if (R.done || !document.body.classList.contains('playing')) return clearInterval(dt);
+        if (Date.now() - duelLast > 2500) Account.Duel.poll(cfg.duel.c).then(duelShow);
+      }, 2500);
+      App.setLeaveGuard(async () => { const ok = await confirmBox('Leave the challenge?', 'Your current score is final if you leave now.', 'Leave', 'Stay'); if (ok) { R.done = true; duelSend(true); } return ok; });
     }
     function hitBoss(dmg, crit) {
       const b = $('#bossIc'); if (!b) return;
@@ -416,6 +434,16 @@
       else if (k === 's' && $('#star')) $('#star').click();
     });
 
+    function duelFinish() {
+      const box = document.createElement('div'); box.className = 'card glow duel-final'; box.innerHTML = `<h3>⚔️ vs ${esc(cfg.duel.opp)}</h3><p class="muted" id="duelWait">Waiting for ${esc(cfg.duel.opp)} to finish…</p>`;
+      const res = $('.results'); res.insertBefore(box, res.firstChild);
+      $$('#retryMiss,#retryAll,#again,#nextCh').forEach(b => b.remove());
+      const show = c => { if (c && c.status === 'done') { box.innerHTML = `<h3>⚔️ vs ${esc(cfg.duel.opp)}</h3>` + Account.Duel.resultHTML(c, cfg.duel.side); FX.confetti(); return true; } duelShow(c); return false; };
+      duelSend(true).then(c => {
+        if (show(c)) return;
+        const t = setInterval(() => { if (!document.body.contains(box)) return clearInterval(t); Account.Duel.poll(cfg.duel.c).then(c2 => { if (show(c2)) clearInterval(t); }); }, 2000);
+      });
+    }
     function finish() {
       if (R.done) return; R.done = true;
       clearInterval(timerInt); stopKeys(); App.setLeaveGuard(null); Resume.done();
@@ -464,6 +492,7 @@
           ${Object.keys(chBreak).length > 1 ? `<div class="card"><h3>By chapter</h3>${Object.entries(chBreak).sort((a, b) => a[1][0] / a[1][1] - b[1][0] / b[1][1]).map(([c, v]) => `<div class="list-item"><span class="grow small">${chTitle(c)}</span><b>${v[0]}/${v[1]}</b></div>`).join('')}</div>` : ''}
           <div id="revList"></div>
         </div>`;
+      if (cfg.duel) duelFinish();
       animateRings(view());
       const again = ids => quiz(Object.assign({}, cfg, { ids, retry: true }));
       if ($('#retryMiss')) $('#retryMiss').onclick = () => again(shuffle(missed));
@@ -904,6 +933,16 @@
     draw();
   }
 
-  window.Modes = { list, setup, start, resume: Resume };
+  /* start a live challenge (both players get the same ids in the same order) */
+  function duel(c, side) {
+    const opp = c[side === 'from' ? 'to' : 'from'].name;
+    const ids = c.ids.filter(id => Q[id]);
+    const ctx = { modeId: c.mode, scope: 'vs ' + opp, chapters: c.ch ? [c.ch] : null, bid: c.ch && CH[c.ch] ? CH[c.ch].bid : 'ts', duel: { c, side, opp } };
+    const base = { title: '⚔️ ' + (M(c.mode) ? M(c.mode).name : 'Challenge'), ids, ordered: true };
+    const extra = { challenge: { feedback: 'instant', challenge: true }, shuffle: { feedback: 'instant', challenge: true, forceShuffle: true }, confidence: { feedback: 'instant', confidence: true },
+      blitz: { feedback: 'flash', timeLimit: 60, blitz: true }, survival: { feedback: 'instant', lives: 3, survival: true }, boss: { feedback: 'instant', boss: true, perQ: 40 } }[c.mode] || { feedback: 'instant', challenge: true };
+    quiz(Object.assign(ctx, base, extra));
+  }
+  window.Modes = { list, setup, start, resume: Resume, duel };
   App.routes.play = () => { if (!view().querySelector('.play,.results')) location.replace('#/'); };
 })();

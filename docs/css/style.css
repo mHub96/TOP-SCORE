@@ -723,3 +723,45 @@ mark { background: color-mix(in srgb, var(--accent2) 30%, transparent); color: i
 .learn-q.skipped { opacity: .55; }
 .skip-card { display: flex; gap: 12px; align-items: center; border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
 .q-meta .skipbtn + .star { margin-left: 0; }
+
+/* ===== v3: accounts, arena ===== */
+body.authing .nav, body.authing .topbar .top-actions, body.authing .site-foot { display: none; }
+body.authing { padding-left: 0 !important; padding-bottom: 0; }
+.auth-wrap { min-height: 80vh; display: grid; place-content: center; gap: 14px; padding: 20px 0; }
+.auth { width: min(420px, 92vw); padding: 26px; text-align: left; }
+.auth h1 { text-align: center; margin: 4px 0; font-size: 2rem; letter-spacing: .04em; }
+.auth-logo { font-size: 3rem; text-align: center; animation: float 4s ease-in-out infinite; }
+.auth .seg { margin: 14px 0; width: 100%; } .auth .seg button { flex: 1; }
+.auth input, .acct-card input { width: 100%; }
+.credit-line { text-align: center; font-size: .78rem; color: var(--muted); max-width: 420px; margin: 0 auto; }
+.site-foot { text-align: center; font-size: .72rem; color: var(--muted); padding: 18px 16px 8px; max-width: 920px; margin: 0 auto; }
+body.playing .site-foot { display: none; }
+.acct-row { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; }
+.acct-av { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent2)); flex: none; }
+.acct-av.sm { width: 32px; height: 32px; font-size: .85rem; } .acct-av.lg { width: 64px; height: 64px; font-size: 1.6rem; }
+.warn-t { color: var(--warn); } .danger-t { color: var(--bad); }
+.adm-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.adm-user { flex-wrap: wrap; }
+[data-badge]:not([data-badge=""]) { position: relative; }
+[data-badge]:not([data-badge=""])::after { content: attr(data-badge); position: absolute; top: 2px; right: 10%; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--bad); color: #fff; font-size: 11px; font-weight: 800; display: grid; place-items: center; animation: pulse 1.6s infinite; }
+.toast-link { color: inherit; display: block; }
+.lb-ctl { margin-bottom: 10px; }
+.lb-row { display: flex; align-items: center; gap: 10px; padding: 10px 6px; border-bottom: 1px solid var(--line); animation: rise .45s both; animation-delay: var(--d); }
+.lb-row:last-child { border-bottom: 0; }
+.lb-row.me { background: color-mix(in srgb, var(--accent) 10%, transparent); border-radius: 12px; }
+.lb-rank { width: 30px; text-align: center; font-weight: 800; font-size: 1.1rem; }
+.lb-v { font-size: 1.05rem; }
+.duel-lobby { text-align: center; }
+.vs { display: flex; align-items: center; justify-content: center; gap: 18px; margin: 16px 0; }
+.vs-p { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px; border-radius: 16px; border: 2px solid transparent; min-width: 110px; transition: border-color .3s; }
+.vs-p.ready { border-color: var(--good); }
+.vs-x { font-size: 2.2rem; font-weight: 900; background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.duel-count { min-height: 60vh; display: grid; place-content: center; text-align: center; }
+.duel-count .vs-x { font-size: 6rem; animation: pop .9s ease-out infinite; }
+.big-go { font-size: 1.1rem; padding: 14px 28px; }
+.duel-hud { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; margin-bottom: 10px; border-color: color-mix(in srgb, var(--accent2) 40%, transparent); }
+.duel-res { margin: 10px 0; } .duel-win { font-size: 1.4rem; font-weight: 800; }
+.vs-score { display: flex; justify-content: center; align-items: center; gap: 22px; margin-top: 8px; }
+.vs-score > div { display: flex; flex-direction: column; } .vs-score b { font-size: 2rem; } .vs-score span { font-size: 1.6rem; color: var(--muted); }
+.duel-final { text-align: center; margin-bottom: 12px; }
+@media (min-width: 900px), (orientation: landscape) and (min-width: 640px) { .site-foot { padding-left: 96px; } body.authing .site-foot { padding-left: 0; } }

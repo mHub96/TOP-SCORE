@@ -49,7 +49,9 @@
   }
   function part(rec, name) { const f = rec.header.files[name]; return f ? rec.blob.slice(rec.header.base + f[0], rec.header.base + f[0] + f[1], f[2]) : null; }
 
+  let myUid = null; try { myUid = (JSON.parse(localStorage.getItem('topscore.acct')) || {}).id || null; } catch (e) { }
   async function open(rec) {
+    if (rec.server && rec.uid !== myUid) return null;      // the owner's library copy is not shown to other accounts on a shared device
     const b = JSON.parse(await part(rec, 'book.json').text());
     const meta = rec.header.book || {};
     const book = Object.assign({}, meta, b, { builtin: false, rec, size: rec.blob.size, built: rec.header.built, urls: {} });
@@ -70,7 +72,7 @@
   })();
 
   /* Load any pack file. Returns {kind:'book', book} or {kind:'explain'} (Greenberg pack, handled by Explain). */
-  async function load(file) {
+  async function load(file, opts = {}) {
     const h = await readHeader(file);
     if (h.kind !== 'book') {
       if (window.Explain) { await Explain.load(file); return { kind: 'explain' }; }
@@ -80,7 +82,7 @@
     const id = h.book && h.book.id;
     if (!id || id === 'ts') throw new Error('The book pack has no valid id.');
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-    await op('readwrite', s => s.put({ blob: file, header: h, name: file.name, at: Date.now() }, id));
+    await op('readwrite', s => s.put({ blob: file, header: h, name: file.name, at: Date.now(), server: !!opts.server, uid: opts.uid || null, updated: opts.updated || 0 }, id));
     const rec = await op('readonly', s => s.get(id));
     const old = BOOKS[id]; if (old && old.urls) Object.values(old.urls).forEach(u => URL.revokeObjectURL(u));
     const book = await open(rec);

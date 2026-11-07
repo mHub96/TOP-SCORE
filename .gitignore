@@ -16,3 +16,4 @@ Books/
 cloudflare-token.txt
 .cf-login/
 sync-worker/.wrangler/
+sync-worker/admin-key.txt
