@@ -22,7 +22,7 @@ const hex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, 
 const sha = async s => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)));
 const rnd = n => hex(crypto.getRandomValues(new Uint8Array(n)));
 const now = () => Date.now();
-const userOut = u => u && ({ id: u.id, username: u.username, display: u.display, role: u.role, status: u.status, lb: !!u.lb, pwAllowed: !!u.pw_allowed, pwRequest: !!u.pw_request, books: JSON.parse(u.books || '[]'), created: u.created, seen: u.seen });
+const userOut = u => u && ({ id: u.id, username: u.username, display: u.display, role: u.role, status: u.status, lb: !!u.lb, pwAllowed: !!u.pw_allowed, pwRequest: !!u.pw_request, books: JSON.parse(u.books || '[]'), created: u.created, seen: u.seen, examHost: u.role === 'owner' || !!u.exam_host });
 async function body(req) { try { return await req.json(); } catch (e) { return {}; } }
 
 async function auth(req, env) {
@@ -35,6 +35,7 @@ async function auth(req, env) {
   return s;
 }
 const isOwner = u => u && u.role === 'owner';
+const canHost = u => isOwner(u) || !!(u && u.exam_host);      // exam rooms: the owner and the people the owner allows
 const CH_SQL = `SELECT c.*, a.display AS from_name, b.display AS to_name FROM challenges c JOIN users a ON a.id = c.from_id JOIN users b ON b.id = c.to_id`;
 
 /* ---------- Web Push (VAPID, no payload: the service worker fetches /api/notifications) ---------- */
@@ -334,6 +335,7 @@ export default {
       }
 
       // ----- exam room: examiner (presenter screen) -----
+      if ((p === '/api/exam' || p === '/api/exam/mine' || /^\/api\/exam\/\d+/.test(p)) && !canHost(me)) return ERR(req, 'Only the owner and the people the owner allows can host exam rooms.', 403);
       if (p === '/api/exam' && M === 'POST') {
         const b = await body(req);
         try { return J(req, await exCreate(env, me, b.cfg || {}, b.keys)); } catch (err) { return ERR(req, err.message); }
@@ -533,6 +535,7 @@ export default {
           if (b.status !== 'active') await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(uid).run();
         }
         if (b.allowPw !== undefined) await env.DB.prepare('UPDATE users SET pw_allowed = ?, pw_request = 0 WHERE id = ?').bind(b.allowPw ? 1 : 0, uid).run();
+        if (b.examHost !== undefined) await env.DB.prepare('UPDATE users SET exam_host = ? WHERE id = ?').bind(b.examHost ? 1 : 0, uid).run();
         if (b.resetPw && /^[0-9a-f]{64}$/.test(b.resetPw)) {
           const salt = rnd(16);
           await env.DB.batch([env.DB.prepare('UPDATE users SET salt = ?, pass = ?, pw_allowed = 1, pw_request = 0 WHERE id = ?').bind(salt, await sha(salt + b.resetPw), uid),

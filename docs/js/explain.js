@@ -112,9 +112,11 @@
     if (d) d.addEventListener('toggle', () => { if (d.open && window.FX) FX.play('flip'); });
   }
   function zoom(name) {
-    const m = App.modal(`<div class="xzoom"><img src="${url(name)}" alt=""></div><p class="muted small center">Pinch or double-tap to zoom · tap ✕ to close</p>`, { cls: 'xzoom-modal' });
-    const img = m.querySelector('.xzoom img');
-    img.onclick = () => img.classList.toggle('big');
+    const m = App.modal(`<div class="xzoom"><img src="${url(name)}" alt=""></div><div class="zoom-ctl"><button class="btn ghost sm" data-z="-1" aria-label="Smaller">－</button><b class="zoom-v">100%</b><button class="btn ghost sm" data-z="1" aria-label="Larger">＋</button></div><p class="muted small center">＋ / － or tap the image to enlarge · drag to move around · ✕ to close</p>`, { cls: 'xzoom-modal' });
+    const img = m.querySelector('.xzoom img'), Z = [1, 1.5, 2, 3, 4]; let z = 0;
+    const set = k => { z = Math.max(0, Math.min(Z.length - 1, k)); img.style.width = Z[z] * 100 + '%'; img.style.maxWidth = 'none'; m.querySelector('.zoom-v').textContent = Z[z] * 100 + '%'; };
+    img.onclick = () => set(z === Z.length - 1 ? 0 : z + 1);
+    m.querySelectorAll('[data-z]').forEach(b => b.onclick = () => set(z + +b.dataset.z));
   }
   async function reader(pp) {
     const m = App.modal(`<div class="xreader"><div class="xr-head"><button class="btn ghost sm" data-d="-1">‹ p. ${pp - 1}</button><b>Greenberg p. ${pp}</b><button class="btn ghost sm" data-d="1">p. ${pp + 1} ›</button></div><div class="xr-body">Loading…</div></div>`, { cls: 'xreader-modal' });

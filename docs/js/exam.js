@@ -41,8 +41,11 @@
   // =====================================================================================
   // EXAMINER: setup
   // =====================================================================================
+  const canHost = () => { const m = Account.me(); return !!(m && (m.role === 'owner' || m.examHost)); };
+  const noHostHTML = '<section class="card"><h2>🖥️ Exam rooms</h2><p class="muted">Hosting exam rooms is limited to the owner and the people the owner allows. Ask the owner if you need it. You can still <b>join</b> an exam with its QR code or room code.</p><a class="btn ghost" href="#/arena/exam">‹ Back</a></section>';
   function setup(prefill) {
     if (!Account.me()) return Account.showAuth();
+    if (!canHost()) { $('#view').innerHTML = noHostHTML; return; }
     const last = Object.assign({ cnt: 20, pace: 'timer', secs: 60, auto: true, guests: false }, JSON.parse(localStorage.getItem('ts.examcfg') || '{}'), prefill || {});
     const books = Books.list();
     const v = $('#view');
@@ -120,6 +123,7 @@
   async function host(id) {
     stopHost();
     if (!Account.me()) return Account.showAuth();
+    if (!canHost()) { $('#view').innerHTML = noHostHTML; return; }
     H = { id, d: null, cur: -2, status: '', prev: {}, poll: null, tick: null, confetti: false };
     const v = $('#view');
     v.innerHTML = `<div class="exs" id="exHost"><div class="muted center" style="padding:20vh 0">Opening the exam room…</div></div>`;
@@ -557,15 +561,17 @@
   // Arena tab: host / join / my rooms
   // =====================================================================================
   async function arenaTab(el) {
+    const host = canHost();
     el.innerHTML = `
-      <section class="card exam-hero"><div class="row gap"><span class="exam-hero-ic">🖥️</span><div class="grow"><h2>Host an exam on a big screen</h2>
+      ${host ? '' : '<!--'}<section class="card exam-hero"><div class="row gap"><span class="exam-hero-ic">🖥️</span><div class="grow"><h2>Host an exam on a big screen</h2>
         <p class="muted small">Pick a book, chapters and the number of questions. A QR code appears on the screen; examinees scan it and answer on their phones, with a live timer and a leaderboard at the end.</p></div></div>
-        <a class="btn big-go" href="#/examroom">🖥️ Open the exam room</a></section>
+        <a class="btn big-go" href="#/examroom">🖥️ Open the exam room</a></section>${host ? '' : '-->'}
       <section class="card"><h2>📱 Join an exam</h2><p class="muted small">Scan the QR code on the big screen, or type its code.</p>
         <div class="row gap"><input id="exJoinC" maxlength="6" placeholder="CODE" class="exam-code-in" autocapitalize="characters"><button class="btn" id="exJoinGo">Join</button></div></section>
-      <section class="card"><h2>Your exam rooms</h2><div id="exMine" class="muted small">Loading…</div></section>`;
+      ${host ? '<section class="card"><h2>Your exam rooms</h2><div id="exMine" class="muted small">Loading…</div></section>' : '<p class="muted small center">Hosting exam rooms is limited to the owner and the people the owner allows.</p>'}`;
     $('#exJoinGo').onclick = () => { const c = $('#exJoinC').value.trim().toUpperCase(); if (c.length >= 4) App.go('#/x/' + c); };
     $('#exJoinC').onkeydown = e => { if (e.key === 'Enter') $('#exJoinGo').click(); };
+    if (!host) return;
     try {
       const { exams } = await api('/exam/mine');
       const st = { lobby: '🟢 waiting for examinees', running: '🔴 running', done: '🏁 finished' };

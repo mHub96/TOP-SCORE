@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>TOP SCORE · Neurosurgery Board Library</title>
   <meta name="description" content="Your neurosurgery board library: a bookshelf of MCQ books with spaced repetition, MCQ challenges, exam simulator and games — offline.">
   <meta name="theme-color" content="#0b0a14">
@@ -12,7 +12,13 @@
   <meta name="apple-mobile-web-app-title" content="TOP SCORE">
   <!-- login gate: nothing of the app is painted until the login check has decided (app.js / account.js lift it) -->
   <style>html.gate .topbar, html.gate .nav, html.gate #view, html.gate .site-foot, html.gate #toasts { visibility: hidden !important; }</style>
-  <script>document.documentElement.classList.add('gate');</script>
+  <script>document.documentElement.classList.add('gate');
+    /* no zooming: the layout resizes to the screen instead (iOS ignores user-scalable=no, so block the gestures too) */
+    ['gesturestart', 'gesturechange', 'gestureend'].forEach(t => document.addEventListener(t, e => e.preventDefault(), { passive: false }));
+    document.addEventListener('touchmove', e => { if (e.touches && e.touches.length > 1) e.preventDefault(); }, { passive: false });
+    addEventListener('wheel', e => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+    addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0'].includes(e.key)) e.preventDefault(); });
+  </script>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">

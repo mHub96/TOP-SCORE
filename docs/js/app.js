@@ -51,8 +51,11 @@
     return `<ol class="opts-prev">${q.o.map((o, i) => `<li class="${isRight(q, i) ? 'ok' : ''} ${ms.includes(i) && !isRight(q, i) ? 'no' : ''}"><b>${L(i)}.</b> ${optText(q, i)}${ms.includes(i) ? ' <small>← your answer</small>' : ''}</li>`).join('')}</ol>`;
   }
   function zoomImg(bid, name) {
-    const m = modal(`<div class="xzoom"><img src="${Books.url(bid, name)}" alt=""></div><p class="muted small center">Tap the image to enlarge · ✕ to close</p>`, { cls: 'xzoom-modal' });
-    const img = m.querySelector('.xzoom img'); img.onclick = () => img.classList.toggle('big');
+    const m = modal(`<div class="xzoom"><img src="${Books.url(bid, name)}" alt=""></div><div class="zoom-ctl"><button class="btn ghost sm" data-z="-1" aria-label="Smaller">－</button><b class="zoom-v">100%</b><button class="btn ghost sm" data-z="1" aria-label="Larger">＋</button></div><p class="muted small center">＋ / － or tap the image to enlarge · drag to move around · ✕ to close</p>`, { cls: 'xzoom-modal' });
+    const img = m.querySelector('.xzoom img'), Z = [1, 1.5, 2, 3, 4]; let z = 0;
+    const set = k => { z = Math.max(0, Math.min(Z.length - 1, k)); img.style.width = Z[z] * 100 + '%'; img.style.maxWidth = 'none'; m.querySelector('.zoom-v').textContent = Z[z] * 100 + '%'; };
+    img.onclick = () => set(z === Z.length - 1 ? 0 : z + 1);
+    m.querySelectorAll('[data-z]').forEach(b => b.onclick = () => set(z + +b.dataset.z));
   }
   document.addEventListener('click', e => { const b = e.target.closest('.qimg'); if (!b) return; e.preventDefault(); e.stopPropagation(); zoomImg(b.dataset.bid, b.dataset.src); }, true);
 
@@ -120,6 +123,7 @@
     document.body.classList.toggle('playing', path === 'play');
     const v = view();
     if (path !== 'play') v.dataset.sid = '';
+    v.dataset.route = path || 'home';
     v.classList.remove('enter'); void v.offsetWidth; v.classList.add('enter');
     if (path !== 'play') window.scrollTo(0, 0);
     fn(arg ? decodeURIComponent(arg) : '');

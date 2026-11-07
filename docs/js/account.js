@@ -338,6 +338,7 @@
             ${u.role === 'owner' ? '' : `<span class="adm-btns">
               ${u.pwRequest ? `<button class="btn sm" data-a="allowpw" data-u="${u.id}">Allow password change</button>` : ''}
               ${u.status === 'rejected' ? `<button class="btn ghost sm" data-a="approve" data-u="${u.id}">Re-activate</button>` : `<button class="btn ghost sm" data-a="block" data-u="${u.id}">Block</button>`}
+              <button class="btn ${u.examHost ? '' : 'ghost'} sm" data-a="${u.examHost ? 'nohost' : 'host'}" data-u="${u.id}" title="Host exam rooms on a big screen">${u.examHost ? '🖥️ Can host exams ✓' : '🖥️ Allow exam rooms'}</button>
               <button class="btn ghost sm" data-a="reset" data-u="${u.id}" data-n="${esc(u.username)}">Temp password</button>
               <button class="btn ghost sm danger-t" data-a="del" data-u="${u.id}" data-n="${esc(u.display)}">Delete</button></span>`}</div>`).join('')}</section>`;
       $$('[data-a]').forEach(b => b.onclick = async () => {
@@ -346,6 +347,7 @@
           if (a === 'approve') await api('/admin/users/' + id, { body: { status: 'active' } });
           if (a === 'reject' || a === 'block') await api('/admin/users/' + id, { body: { status: 'rejected' } });
           if (a === 'allowpw') await api('/admin/users/' + id, { body: { allowPw: true } });
+          if (a === 'host' || a === 'nohost') await api('/admin/users/' + id, { body: { examHost: a === 'host' } });
           if (a === 'reset') {
             const pw = prompt(`Temporary password for @${b.dataset.n} (at least 6 characters). Give it to them privately; they can then change it.`);
             if (!pw) return; if (pw.length < 6) return App.toast('At least 6 characters');

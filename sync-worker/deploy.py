@@ -50,6 +50,9 @@ if any(c['name'] == 'code' for c in cols):
 else:
     call('POST', f'/d1/database/{dbid}/query', {'sql': 'CREATE TABLE IF NOT EXISTS progress (user_id INTEGER PRIMARY KEY, rev INTEGER NOT NULL, updated INTEGER NOT NULL, data TEXT NOT NULL)'})
     call('POST', f'/d1/database/{dbid}/query', {'sql': 'DROP TABLE IF EXISTS progress2'})
+ucols = [c['name'] for c in call('POST', f'/d1/database/{dbid}/query', {'sql': "SELECT name FROM pragma_table_info('users')"})['result'][0]['results']]
+if 'exam_host' not in ucols:     # owner-granted right to host exam rooms
+    call('POST', f'/d1/database/{dbid}/query', {'sql': 'ALTER TABLE users ADD COLUMN exam_host INTEGER DEFAULT 0'})
 print('schema ready')
 
 src = open(os.path.join(here, 'worker.js'), 'rb').read()

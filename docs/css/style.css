@@ -925,3 +925,34 @@ body.exam-locked { -webkit-user-select: none; user-select: none; -webkit-touch-c
 .exp-sum .good { background: var(--good-bg); } .exp-sum .bad { background: var(--bad-bg); }
 .exp-rev.no { border-left: 4px solid var(--bad); } .exp-rev.ok { border-left: 4px solid var(--good); } .exp-rev.skip { border-left: 4px solid var(--muted); }
 .exp-rev .qcard { margin-top: 8px; }
+
+/* ===================== v3.4 ===================== */
+/* no zoom: pinch and double-tap zoom are off; the layout fits the screen and the Text size setting enlarges */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { touch-action: pan-x pan-y; }
+input, select, textarea { font-size: max(16px, 1em); }
+.zoom-ctl { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 8px; }
+.zoom-ctl .btn { min-width: 46px; font-size: 1.2rem; }
+.zoom-v { min-width: 4em; text-align: center; }
+.xzoom img { transition: width .2s; }
+/* Greenberg tables and figures grow with the Text size setting (scroll sideways when wider than the screen) */
+.xfig, .xr-body .xfig { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.xfig .ximg { width: calc(100% * var(--fs, 1)); max-width: none; }
+
+/* landscape / wide screens: use the whole width */
+@media (min-width: 900px), (orientation: landscape) and (min-width: 640px) {
+  .view { max-width: none; padding: 16px clamp(16px, 2.2vw, 40px); }
+  .play, .results { max-width: none; }
+  .fc-stage { max-width: min(100%, 1400px); }
+  .tf-card, .tf-btns { max-width: min(100%, 1400px); }
+  .site-foot { max-width: none; }
+  .fc-xp { max-width: none; }
+  .exp { max-width: none; }
+  .modal.sheet { max-width: min(92vw, 980px); }
+}
+
+@media (min-width: 1200px) {
+  .view[data-route="settings"] { column-count: 2; column-gap: 20px; }
+  .view[data-route="settings"] > * { break-inside: avoid; margin-top: 0; margin-bottom: 16px; }
+  .view[data-route="settings"] > .page-head { column-span: all; }
+}

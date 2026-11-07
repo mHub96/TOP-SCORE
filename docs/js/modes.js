@@ -249,7 +249,7 @@
           ${cfg.boss ? `<div class="boss card" id="boss"><div class="boss-ic" id="bossIc">${R.bossIc}</div><div class="grow"><b>${esc(R.bossName)}</b><div class="hpbar boss-hp"><i id="bossHp"></i></div><div class="row between small"><span id="you"></span><span class="muted" id="bossTxt"></span></div></div></div>` : ''}
           <div id="qbox"></div>
         </div>`;
-      $('#quit').onclick = () => strict ? submitAsk(true) : App.go(backHash(cfg));
+      $('#quit').onclick = () => App.go(backHash(cfg));
     }
     function hud() {
       const parts = [];
@@ -579,7 +579,7 @@
             </div></div>
           </article>
         </div>`;
-      $('#quit').onclick = () => App.go(backHash(cfg));
+      $('#quit').onclick = () => strict ? submitAsk(true) : App.go(backHash(cfg));
       $$('.opt').forEach(b => b.onclick = () => {
         const oi = +b.dataset.oi;
         if (multi) { const a = new Set(E.ans[id] || []); a.has(oi) ? a.delete(oi) : a.add(oi); E.ans[id] = [...a]; b.classList.toggle('sel', a.has(oi)); }
