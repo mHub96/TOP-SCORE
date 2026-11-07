@@ -772,3 +772,9 @@ body.playing .site-foot { display: none; }
 .book-tile .b-info .row { gap: 6px; }
 .book-tile .b-info .row > span { flex: none; }
 .book-tile .b-info .row > b { min-width: 0; }
+
+/* v3.1 push notifications box */
+.push-box { margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); }
+.push-ic { font-size: 1.6rem; line-height: 1; animation: pushRing 2.4s ease-in-out infinite; transform-origin: 50% 10%; }
+@keyframes pushRing { 0%, 70%, 100% { transform: rotate(0); } 75% { transform: rotate(14deg); } 80% { transform: rotate(-12deg); } 85% { transform: rotate(8deg); } 90% { transform: rotate(-4deg); } }
+@media (prefers-reduced-motion: reduce) { .push-ic { animation: none; } }

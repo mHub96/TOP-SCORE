@@ -11,6 +11,7 @@ NAME = sys.argv[1] if len(sys.argv) > 1 else 'topscore-sync'      # 'topscore-te
 KEYF = os.path.join(here, 'admin-key.txt')
 if not os.path.exists(KEYF): open(KEYF, 'w').write(secrets.token_hex(24))
 ADMIN_KEY = open(KEYF).read().strip()
+VAPID = json.load(open(os.path.join(here, 'vapid.json')))     # web-push keys (gitignored)
 
 def call(method, path, body=None, ctype='application/json', raw=None):
     data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
@@ -32,6 +33,8 @@ SCHEMA = [
     'CREATE TABLE IF NOT EXISTS challenges (id INTEGER PRIMARY KEY AUTOINCREMENT, from_id INTEGER, to_id INTEGER, mode TEXT, title TEXT, ch_key TEXT, ids TEXT, status TEXT, created INTEGER, start_at INTEGER, ended INTEGER, from_ready INTEGER DEFAULT 0, to_ready INTEGER DEFAULT 0, from_score INTEGER DEFAULT 0, to_score INTEGER DEFAULT 0, from_correct INTEGER DEFAULT 0, to_correct INTEGER DEFAULT 0, from_answered INTEGER DEFAULT 0, to_answered INTEGER DEFAULT 0, from_done INTEGER DEFAULT 0, to_done INTEGER DEFAULT 0, from_ms INTEGER DEFAULT 0, to_ms INTEGER DEFAULT 0)',
     'CREATE TABLE IF NOT EXISTS books (id TEXT PRIMARY KEY, meta TEXT, size INTEGER, chunks INTEGER, visible INTEGER DEFAULT 1, updated INTEGER)',
     'CREATE TABLE IF NOT EXISTS pack_chunks (book_id TEXT, idx INTEGER, data BLOB, PRIMARY KEY (book_id, idx))',
+    'CREATE TABLE IF NOT EXISTS push_subs (endpoint TEXT PRIMARY KEY, user_id INTEGER, keys TEXT, created INTEGER)',
+    'CREATE TABLE IF NOT EXISTS notifs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, title TEXT, body TEXT, url TEXT, created INTEGER, delivered INTEGER DEFAULT 0)',
 ]
 for sql in SCHEMA: call('POST', f'/d1/database/{dbid}/query', {'sql': sql})
 # the old code-based sync table had user codes as keys; the account system uses user ids
@@ -46,7 +49,9 @@ print('schema ready')
 
 src = open(os.path.join(here, 'worker.js'), 'rb').read()
 meta = {'main_module': 'worker.js', 'compatibility_date': '2026-10-01',
-        'bindings': [{'type': 'd1', 'name': 'DB', 'id': dbid}, {'type': 'secret_text', 'name': 'ADMIN_KEY', 'text': ADMIN_KEY}]}
+        'bindings': [{'type': 'd1', 'name': 'DB', 'id': dbid}, {'type': 'secret_text', 'name': 'ADMIN_KEY', 'text': ADMIN_KEY},
+                     {'type': 'secret_text', 'name': 'VAPID_PRIVATE_JWK', 'text': json.dumps(VAPID['privateJwk'])},
+                     {'type': 'plain_text', 'name': 'VAPID_PUBLIC', 'text': VAPID['publicKey']}]}
 b = uuid.uuid4().hex
 parts = [
     f'--{b}\r\nContent-Disposition: form-data; name="metadata"\r\nContent-Type: application/json\r\n\r\n'.encode() + json.dumps(meta).encode() + b'\r\n',

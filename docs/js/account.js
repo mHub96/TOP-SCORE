@@ -10,6 +10,61 @@
   const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+  // ---------- push notifications (phone status-bar alerts while the app is closed) ----------
+  const Push = (() => {
+    const AUTHC = 'topscore-auth';
+    const supported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+    const ios = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const standalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches;
+    const b64 = k => { const s = atob((k + '='.repeat((4 - k.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(s, c => c.charCodeAt(0)); };
+    async function token(t) {
+      try { if (!('caches' in window)) return; const c = await caches.open(AUTHC); if (t) await c.put('token', new Response(t)); else { await c.delete('token'); await c.delete('last'); } } catch (e) { }
+    }
+    async function reg() { return navigator.serviceWorker.getRegistration() .then(r => r || navigator.serviceWorker.register('sw.js')).then(() => navigator.serviceWorker.ready); }
+    async function current() { if (!supported()) return null; try { return await (await reg()).pushManager.getSubscription(); } catch (e) { return null; } }
+    /* 'on' | 'off' | 'blocked' | 'install' (iPhone: must be opened from the home-screen icon) | 'unsupported' */
+    async function state() {
+      if (ios() && !standalone()) return 'install';
+      if (!supported()) return 'unsupported';
+      if (Notification.permission === 'denied') return 'blocked';
+      return Notification.permission === 'granted' && await current() ? 'on' : 'off';
+    }
+    async function send(sub) { await api('/push/subscribe', { body: { sub: sub.toJSON() } }); }
+    async function enable() {
+      const st = await state();
+      if (st === 'install' || st === 'unsupported' || st === 'blocked') return st;
+      const perm = await Notification.requestPermission();      // must run inside the button tap
+      if (perm !== 'granted') return perm === 'denied' ? 'blocked' : 'off';
+      const r = await reg();
+      let sub = await r.pushManager.getSubscription();
+      if (!sub) {
+        const { key } = await api('/push/key');
+        if (!key) throw new Error('The server has no push key.');
+        sub = await r.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(key) });
+      }
+      await token(acct && acct.token);
+      await send(sub);
+      return 'on';
+    }
+    async function disable() {
+      const sub = await current(); if (!sub) return;
+      try { await api('/push/unsubscribe', { body: { endpoint: sub.endpoint } }); } catch (e) { }
+      try { await sub.unsubscribe(); } catch (e) { }
+    }
+    /* every start: keep the server's copy of this device's subscription fresh (it can change silently) */
+    async function refresh() {
+      if (!acct || !supported() || Notification.permission !== 'granted') return;
+      try {
+        await token(acct.token);
+        const r = await reg(); let sub = await r.pushManager.getSubscription();
+        if (!sub) { const { key } = await api('/push/key'); if (key) sub = await r.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(key) }); }
+        if (sub) await send(sub);
+      } catch (e) { }
+    }
+    async function test() { return api('/push/test', { body: {} }); }
+    return { supported, ios, standalone, state, enable, disable, refresh, test, token };
+  })();
+
   // ---------- API ----------
   async function api(path, opts = {}) {
     const headers = Object.assign({}, opts.body && !(opts.body instanceof Blob) ? { 'Content-Type': 'application/json' } : {}, acct && acct.token ? { Authorization: 'Bearer ' + acct.token } : {});
@@ -28,7 +83,7 @@
     const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: new TextEncoder().encode('topscore:' + username.toLowerCase()), iterations: 200000 }, key, 256);
     return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, '0')).join('');
   }
-  function saveAcct(a) { acct = a; if (a) localStorage.setItem(AKEY, JSON.stringify(a)); else localStorage.removeItem(AKEY); }
+  function saveAcct(a) { acct = a; if (a) localStorage.setItem(AKEY, JSON.stringify(a)); else localStorage.removeItem(AKEY); Push.token(a && a.token); }
   function expired() { const u = acct && acct.username; saveAcct(null); sessionStorage.setItem('ts.relogin', u || ''); location.reload(); }
   const me = () => acct;
   const isOwner = () => !!(acct && acct.role === 'owner');
@@ -94,6 +149,7 @@
   async function logout() {
     if (!await App.confirmBox('Log out?', 'Your progress is saved in your account. Log in again on any device to continue.', 'Log out')) return;
     try { await window.Sync.sync('logout'); } catch (e) { }
+    try { await Push.disable(); } catch (e) { }
     try { await api('/logout', { body: {} }); } catch (e) { }
     saveAcct(null); location.hash = '#/'; location.reload();
   }
@@ -106,6 +162,18 @@
       await api('/me', { body: { books: Books.list().map(b => b.id) } });
     } catch (e) { /* offline: keep working locally */ }
     if (isOwner()) syncLibrary().catch(() => { });
+    Push.token(acct && acct.token); Push.refresh();
+    setTimeout(() => Push.state().then(st => {
+      if ((st === 'off' || st === 'install') && !localStorage.getItem('ts.pushAsk')) {
+        localStorage.setItem('ts.pushAsk', '1');
+        App.toast('<a href="#/settings" class="toast-link"><b>🔔 Get challenge alerts on this device</b><br><small>Settings → Your account → Activate notifications</small></a>', 10000);
+      }
+    }), 4000);
+    if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => {
+      const d = e.data || {};
+      if (d.type === 'push') { (d.items || []).forEach(it => notify(it.title, it.body, it.url || '#/arena', true)); pollInbox(); }
+      if (d.type === 'open' && d.url) location.hash = d.url;
+    });
     pollInbox(); inboxT = setInterval(() => { if (!document.hidden) pollInbox(); }, 20000);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) pollInbox(); });
   }
@@ -145,12 +213,12 @@
     sessionStorage.setItem('ts.seenInv', JSON.stringify([...seenInvites]));
     badge();
   }
-  function notify(title, text, href) {
-    const t = App.toast(`<a href="${href}" class="toast-link"><b>${esc(title)}</b><br><small>${esc(text || '')}</small></a>`, 9000);
+  function notify(title, text, href, fromPush) {
+    const k = 'n:' + title + '|' + href;            // the same event can arrive by push and by the inbox poll
+    if (notify.last && notify.last[k] && Date.now() - notify.last[k] < 60000) return;
+    (notify.last = notify.last || {})[k] = Date.now();
+    App.toast(`<a href="${href}" class="toast-link"><b>${esc(title)}</b><br><small>${esc(text || '')}</small></a>`, 9000);
     FX.play('level'); FX.buzz([60, 40, 60]);
-    if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
-      try { const n = new Notification(title, { body: text || '', icon: 'icons/icon-192.png', tag: href }); n.onclick = () => { focus(); location.hash = href; }; } catch (e) { }
-    }
   }
   function badge() {
     const waiting = inbox.challenges.filter(c => (c.status === 'pending' && c.to.id === acct.id) || (c.status === 'accepted')).length;
@@ -169,6 +237,7 @@
       <label class="field"><span>Name shown to friends</span><div class="row gap"><input id="acName" value="${esc(acct.display)}" maxlength="40"><button class="btn sm" id="acNameSave">Save</button></div></label>
       <label class="switch-row"><span>🏆 Show me on the leaderboards</span><input type="checkbox" id="acLb" ${acct.lb !== false ? 'checked' : ''}><i class="switch"></i></label>
       <details class="sy-link" id="acPwBox"><summary>🔑 Change password</summary>${pwFormHTML()}</details>
+      <div class="push-box" id="pushBox"><div class="row gap"><span class="push-ic">🔔</span><div class="grow"><b>Notifications on this device</b><div class="muted small" id="pushTxt">Checking…</div></div></div><div class="row gap wrap mt-s" id="pushBtns"></div></div>
       ${isOwner() ? `<div class="row gap wrap mt"><a class="btn" href="#/admin">🛡️ Owner panel</a></div>` : ''}
     </section>`;
   }
@@ -193,7 +262,38 @@
       try { await api('/password', { body: { old: await pwHash(acct.username, o), pw: await pwHash(acct.username, n) } }); acct.pwAllowed = false; acct.pwRequest = false; saveAcct(acct); App.toast('🔑 Password changed'); App.render(); }
       catch (e) { App.toast('⚠️ ' + esc(e.message)); go.disabled = false; }
     };
+    drawPush();
     if (window.Sync) { const draw = i => { const el = $('#syState'); if (el) el.textContent = i.state === 'syncing' ? 'Syncing…' : i.error ? '⚠️ ' + i.error : i.at ? '✅ Synced ' + App.ago(i.at) : 'Not synced yet'; }; draw(Sync.info()); Sync.onChange(draw); }
+  }
+
+  const PUSH_TXT = {
+    on: '✅ On — challenges' + (isOwner() ? ', new accounts and password requests' : '') + ' show in your phone’s status bar, even when the app is closed.',
+    off: 'Off — you only see alerts while the app is open.',
+    blocked: '⛔ Blocked for this site. Open your browser’s site settings (🔒 next to the address, or the app info → Notifications), allow notifications, then come back.',
+    install: '📲 On iPhone/iPad, notifications only work in the installed app: Safari → Share → <b>Add to Home Screen</b>, open TOP SCORE from that icon, then tap Activate here (iOS 16.4 or newer).',
+    unsupported: 'This browser cannot receive push notifications. Use Chrome on Android, or the installed home-screen app on iPhone.'
+  };
+  async function drawPush(where = '#pushBox') {
+    const box = $(where); if (!box) return;
+    const st = await Push.state();
+    $('#pushTxt', box) && ($('#pushTxt', box).innerHTML = PUSH_TXT[st]);
+    const btns = $('#pushBtns', box); if (!btns) return;
+    btns.innerHTML = st === 'on' ? '<button class="btn sm" data-p="test">📨 Send a test notification</button><button class="btn ghost sm" data-p="off">Turn off</button>'
+      : st === 'off' ? '<button class="btn glow" data-p="on">🔔 Activate notifications</button>'
+      : st === 'blocked' ? '<button class="btn ghost sm" data-p="on">🔄 Check again</button>' : '';
+    $$('[data-p]', btns).forEach(b => b.onclick = async () => {
+      b.disabled = true;
+      try {
+        if (b.dataset.p === 'on') {
+          const r = await Push.enable();
+          if (r === 'on') { App.toast('🔔 Notifications activated'); FX.play('level'); const t = await Push.test(); if (!t.devices) App.toast('⚠️ The server did not register this device — try again'); }
+          else App.toast(r === 'blocked' ? '⛔ Notifications are blocked — see the note' : 'Notifications not allowed');
+        }
+        if (b.dataset.p === 'test') { const t = await Push.test(); App.toast(t.devices ? `📨 Sent to ${t.devices} device${t.devices > 1 ? 's' : ''} — it should arrive in a few seconds` : '⚠️ No device registered — turn notifications off and on again'); }
+        if (b.dataset.p === 'off') { await Push.disable(); App.toast('🔕 Notifications off on this device'); }
+      } catch (e) { App.toast('⚠️ ' + esc(e.message)); }
+      drawPush(where);
+    });
   }
 
   /* owner: library card (visibility of each book on the server) */
@@ -306,11 +406,11 @@
       <section class="card"><div class="row between"><h2>New challenge</h2></div>
         <p class="muted small">Challenge a friend on any chapter — you both get the same questions in the same order. Pick a book you both have.</p>
         <button class="btn" id="newDuel" ${users.users.length ? '' : 'disabled'}>⚔️ Challenge someone</button>${users.users.length ? '' : '<p class="muted small">No other approved accounts yet.</p>'}
-        ${'Notification' in window && Notification.permission === 'default' ? '<button class="btn ghost sm mt-s" id="notifOn">🔔 Allow notifications</button>' : ''}</section>
+        <div class="push-box mt" id="arPush"><div class="row gap"><span class="push-ic">🔔</span><div class="grow"><b>Challenge alerts on this device</b><div class="muted small" id="pushTxt">Checking…</div></div></div><div class="row gap wrap mt-s" id="pushBtns"></div></div></section>
       <section class="card"><h2>Active</h2>${open.map(row).join('') || '<p class="muted small">No active challenges.</p>'}</section>
       <section class="card"><h2>Recent results</h2>${done.map(row).join('') || '<p class="muted small">No finished challenges yet.</p>'}</section>`;
     $('#newDuel') && ($('#newDuel').onclick = () => newDuel(users.users));
-    $('#notifOn') && ($('#notifOn').onclick = async () => { await Notification.requestPermission(); App.render(); });
+    drawPush('#arPush');
   }
   function duelWinner(c, mine) {
     const meFrom = c.from.id === mine, my = meFrom ? c.from : c.to, opp = meFrom ? c.to : c.from;
@@ -405,5 +505,5 @@
     resultHTML: duelResultHTML
   };
 
-  window.Account = { api, me, isOwner, showAuth, start, logout, settingsHTML, bindSettings, libraryHTML, bindLibrary, syncLibrary, pollInbox, Duel, OWNER_CREDIT, pwHash };
+  window.Account = { Push, drawPush, api, me, isOwner, showAuth, start, logout, settingsHTML, bindSettings, libraryHTML, bindLibrary, syncLibrary, pollInbox, Duel, OWNER_CREDIT, pwHash };
 })();

@@ -37,8 +37,38 @@ async function auth(req, env) {
 const isOwner = u => u && u.role === 'owner';
 const CH_SQL = `SELECT c.*, a.display AS from_name, b.display AS to_name FROM challenges c JOIN users a ON a.id = c.from_id JOIN users b ON b.id = c.to_id`;
 
+/* ---------- Web Push (VAPID, no payload: the service worker fetches /api/notifications) ---------- */
+const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const b64uStr = str => b64u(new TextEncoder().encode(str));
+let VKEY = null;
+async function vapidKey(env) {
+  if (!VKEY) VKEY = await crypto.subtle.importKey('jwk', JSON.parse(env.VAPID_PRIVATE_JWK), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+  return VKEY;
+}
+async function pushOne(env, sub) {
+  const aud = new URL(sub.endpoint).origin;
+  const head = b64uStr(JSON.stringify({ typ: 'JWT', alg: 'ES256' }));
+  const claims = b64uStr(JSON.stringify({ aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: 'https://mhub96.github.io/TOP-SCORE/' }));
+  const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, await vapidKey(env), new TextEncoder().encode(head + '.' + claims));
+  const r = await fetch(sub.endpoint, { method: 'POST', headers: { TTL: '86400', Urgency: 'high', 'Content-Length': '0', Authorization: `vapid t=${head}.${claims}.${b64u(sig)}, k=${env.VAPID_PUBLIC}` } });
+  if (r.status === 404 || r.status === 410) await env.DB.prepare('DELETE FROM push_subs WHERE endpoint = ?').bind(sub.endpoint).run();
+  return r.status;
+}
+/* queue a notification for a user and wake their devices */
+async function notifyUser(env, ctx, uid, title, body, url) {
+  await env.DB.prepare('INSERT INTO notifs (user_id, title, body, url, created, delivered) VALUES (?, ?, ?, ?, ?, 0)').bind(uid, title, body || '', url || '', Date.now()).run();
+  if (!env.VAPID_PRIVATE_JWK) return;
+  const subs = await env.DB.prepare('SELECT endpoint FROM push_subs WHERE user_id = ?').bind(uid).all();
+  const job = Promise.all(subs.results.map(x => pushOne(env, x).catch(() => 0)));
+  if (ctx && ctx.waitUntil) ctx.waitUntil(job); else await job;
+}
+async function notifyOwner(env, ctx, title, body, url) {
+  const o = await env.DB.prepare("SELECT id FROM users WHERE role = 'owner' LIMIT 1").first();
+  if (o) await notifyUser(env, ctx, o.id, title, body, url);
+}
+
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(req) });
     const url = new URL(req.url), p = url.pathname, M = req.method;
     try {
@@ -56,6 +86,7 @@ export default {
         const salt = rnd(16);
         await env.DB.prepare('INSERT INTO users (username, display, salt, pass, role, status, lb, created) VALUES (?, ?, ?, ?, ?, ?, 1, ?)')
           .bind(username, display, salt, await sha(salt + b.pw), first ? 'owner' : 'user', first ? 'active' : 'pending', now()).run();
+        if (!first) await notifyOwner(env, ctx, '👤 New account request', `${display} (@${username}) wants to join TOP SCORE`, '#/admin');
         return J(req, { ok: true, owner: first, pending: !first });
       }
       if (p === '/api/login' && M === 'POST') {
@@ -99,7 +130,41 @@ export default {
       }
       if (p === '/api/password/request' && M === 'POST') {
         await env.DB.prepare('UPDATE users SET pw_request = 1 WHERE id = ?').bind(me.id).run();
+        await notifyOwner(env, ctx, '🔑 Password change request', `${me.display} asks to change their password`, '#/admin');
         return J(req, { ok: true });
+      }
+
+      // ----- push notifications -----
+      if (p === '/api/push/key' && M === 'GET') return J(req, { key: env.VAPID_PUBLIC || '' });
+      if (p === '/api/push/subscribe' && M === 'POST') {
+        const b = await body(req);
+        if (!b.sub || !b.sub.endpoint || !/^https:\/\//.test(b.sub.endpoint)) return ERR(req, 'bad subscription');
+        await env.DB.prepare('INSERT INTO push_subs (endpoint, user_id, keys, created) VALUES (?, ?, ?, ?) ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, keys = excluded.keys')
+          .bind(b.sub.endpoint, me.id, JSON.stringify(b.sub.keys || {}), now()).run();
+        return J(req, { ok: true });
+      }
+      if (p === '/api/push/unsubscribe' && M === 'POST') {
+        const b = await body(req);
+        await env.DB.prepare('DELETE FROM push_subs WHERE endpoint = ? AND user_id = ?').bind(String(b.endpoint || ''), me.id).run();
+        return J(req, { ok: true });
+      }
+      if (p === '/api/push/test' && M === 'POST') {
+        await env.DB.prepare('INSERT INTO notifs (user_id, title, body, url, created, delivered) VALUES (?, ?, ?, ?, ?, 0)').bind(me.id, '🔔 Notifications are on', 'You will be told about challenges' + (isOwner(me) ? ', new accounts and password requests.' : '.'), '#/arena', now()).run();
+        const subs = await env.DB.prepare('SELECT endpoint FROM push_subs WHERE user_id = ?').bind(me.id).all();
+        const st = await Promise.all(subs.results.map(x => pushOne(env, x).catch(e => 'error: ' + e.message)));
+        return J(req, { devices: subs.results.length, results: st });
+      }
+      if (p === '/api/notifications' && M === 'GET') {
+        // each device remembers the last id it showed (?after=) so a phone and a tablet both get every alert
+        const after = url.searchParams.get('after');
+        if (after !== null) {
+          const since = +after > 0 ? now() - 3 * 86400000 : now() - 15 * 60000;
+          const rows = await env.DB.prepare('SELECT id, title, body, url, created FROM notifs WHERE user_id = ? AND id > ? AND created > ? ORDER BY id').bind(me.id, +after || 0, since).all();
+          return J(req, { items: rows.results });
+        }
+        const rows = await env.DB.prepare('SELECT id, title, body, url, created FROM notifs WHERE user_id = ? AND delivered = 0 AND created > ? ORDER BY id').bind(me.id, now() - 3 * 86400000).all();
+        if (rows.results.length) await env.DB.prepare('UPDATE notifs SET delivered = 1 WHERE user_id = ? AND delivered = 0').bind(me.id).run();
+        return J(req, { items: rows.results });
       }
 
       // ----- progress -----
@@ -156,6 +221,7 @@ export default {
         if (!Array.isArray(b.ids) || !b.ids.length || b.ids.length > 400) return ERR(req, 'No questions.');
         const r = await env.DB.prepare(`INSERT INTO challenges (from_id, to_id, mode, title, ch_key, ids, status, created) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`)
           .bind(me.id, to.id, mode, String(b.title || '').slice(0, 160), String(b.ch || ''), JSON.stringify(b.ids.map(String)), now()).run();
+        await notifyUser(env, ctx, to.id, `⚔️ ${me.display} challenges you!`, String(b.title || ''), '#/duel/' + r.meta.last_row_id);
         return J(req, { id: r.meta.last_row_id });
       }
       if (p === '/api/challenges' && M === 'GET') {
@@ -170,19 +236,27 @@ export default {
         const side = c.from_id === me.id ? 'from' : 'to';
         if (M === 'GET') return J(req, { challenge: chOut(c), side });
         const b = await body(req);
-        if (act === 'accept' && side === 'to' && c.status === 'pending') await env.DB.prepare("UPDATE challenges SET status = 'accepted' WHERE id = ?").bind(id).run();
+        const oppId = side === 'from' ? c.to_id : c.from_id;
+        if (act === 'accept' && side === 'to' && c.status === 'pending') {
+          await env.DB.prepare("UPDATE challenges SET status = 'accepted' WHERE id = ?").bind(id).run();
+          await notifyUser(env, ctx, oppId, `⚔️ ${me.display} accepted your challenge`, 'Open the lobby and press Start.', '#/duel/' + id);
+        }
         else if (act === 'decline' && side === 'to' && c.status === 'pending') await env.DB.prepare("UPDATE challenges SET status = 'declined' WHERE id = ?").bind(id).run();
         else if (act === 'cancel' && ['pending', 'accepted'].includes(c.status)) await env.DB.prepare("UPDATE challenges SET status = 'cancelled' WHERE id = ?").bind(id).run();
         else if (act === 'ready' && c.status === 'accepted') {
           await env.DB.prepare(`UPDATE challenges SET ${side}_ready = 1 WHERE id = ?`).bind(id).run();
           const x = await env.DB.prepare('SELECT from_ready, to_ready FROM challenges WHERE id = ?').bind(id).first();
+          if (!(x.from_ready && x.to_ready)) await notifyUser(env, ctx, oppId, `▶️ ${me.display} is ready`, 'Press Start challenge to begin.', '#/duel/' + id);
           if (x.from_ready && x.to_ready) await env.DB.prepare("UPDATE challenges SET status = 'running', start_at = ? WHERE id = ? AND status = 'accepted'").bind(now() + 4000, id).run();
         }
         else if (act === 'progress' && c.status === 'running') {
           await env.DB.prepare(`UPDATE challenges SET ${side}_score = ?, ${side}_correct = ?, ${side}_answered = ?, ${side}_done = ?, ${side}_ms = ? WHERE id = ?`)
             .bind(Number(b.score) || 0, Number(b.correct) || 0, Number(b.answered) || 0, b.done ? 1 : 0, Number(b.ms) || 0, id).run();
           const x = await env.DB.prepare('SELECT from_done, to_done FROM challenges WHERE id = ?').bind(id).first();
-          if (x.from_done && x.to_done) await env.DB.prepare("UPDATE challenges SET status = 'done', ended = ? WHERE id = ?").bind(now(), id).run();
+          if (x.from_done && x.to_done) {
+            await env.DB.prepare("UPDATE challenges SET status = 'done', ended = ? WHERE id = ?").bind(now(), id).run();
+            await notifyUser(env, ctx, oppId, `🏁 Challenge result vs ${me.display}`, 'Tap to see who won.', '#/duel/' + id);
+          }
         }
         else if (act === 'progress' && c.status === 'done') { /* late update after both finished: ignore */ }
         else return ERR(req, 'Not possible now.');
