@@ -165,7 +165,7 @@
     if (isOwner()) syncLibrary().catch(() => { });
     Push.token(acct && acct.token); Push.refresh();
     setTimeout(() => Push.state().then(st => {
-      if ((st === 'off' || st === 'install') && !localStorage.getItem('ts.pushAsk')) {
+      if ((st === 'off' || st === 'install') && !localStorage.getItem('ts.pushAsk') && !document.body.classList.contains('exam-locked') && !document.body.classList.contains('playing') && !document.body.classList.contains('exam-mode')) {
         localStorage.setItem('ts.pushAsk', '1');
         App.toast('<a href="#/settings" class="toast-link"><b>🔔 Get challenge alerts on this device</b><br><small>Settings → Your account → Activate notifications</small></a>', 10000);
       }
@@ -215,6 +215,7 @@
     badge();
   }
   function notify(title, text, href, fromPush) {
+    if (document.body.classList.contains('exam-locked') || document.body.classList.contains('exam-mode')) return;   // nothing pops up over an exam
     const k = 'n:' + title + '|' + href;            // the same event can arrive by push and by the inbox poll
     if (notify.last && notify.last[k] && Date.now() - notify.last[k] < 60000) return;
     (notify.last = notify.last || {})[k] = Date.now();

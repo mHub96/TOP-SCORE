@@ -1,5 +1,5 @@
 /* TOP SCORE service worker — offline-first app shell. Bump VERSION on every deploy. */
-const VERSION = 'topscore-v3.2.1';
+const VERSION = 'topscore-v3.3.0';
 const AUTH = 'topscore-auth';      // holds the login token so push notifications can be fetched while the app is closed
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
@@ -7,7 +7,7 @@ const SHELL = [
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png', 'icons/ts-cover.webp', 'icons/badge-96.png'
 ];
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' }))))   /* bypass the HTTP cache: never mix old and new files */.then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== VERSION && k !== AUTH).map(k => caches.delete(k)))).then(() => self.clients.claim()));

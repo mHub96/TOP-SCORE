@@ -642,6 +642,7 @@
         ${toggle('sound', '🔊 Sound effects', set.sound)}
         ${toggle('haptics', '📳 Vibration feedback', set.haptics)}
         ${toggle('shuffleOpts', '🔀 Shuffle answer options (questions with “All of the above”, “Both A and B”, figure labels… are never shuffled)', set.shuffleOpts)}
+        ${toggle('strictExam', '🛡️ Strict Exam Simulator: leaving the screen (other app, notification panel, call…) submits the exam', set.strictExam !== false)}
         ${toggle('recallFirst', '🤔 Recall-first: hide options until you try to recall the answer (generation effect)', set.recallFirst)}
       </section>
       <section class="card">

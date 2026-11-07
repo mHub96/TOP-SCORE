@@ -249,7 +249,7 @@
           ${cfg.boss ? `<div class="boss card" id="boss"><div class="boss-ic" id="bossIc">${R.bossIc}</div><div class="grow"><b>${esc(R.bossName)}</b><div class="hpbar boss-hp"><i id="bossHp"></i></div><div class="row between small"><span id="you"></span><span class="muted" id="bossTxt"></span></div></div></div>` : ''}
           <div id="qbox"></div>
         </div>`;
-      $('#quit').onclick = () => App.go(backHash(cfg));
+      $('#quit').onclick = () => strict ? submitAsk(true) : App.go(backHash(cfg));
     }
     function hud() {
       const parts = [];
@@ -547,14 +547,16 @@
 
   // ---------- exam simulator ----------
   function exam(cfg, saved) {
-    enterPlay();
     const st = S(), n = cfg.ids.length;
+    const strict = st.settings.strictExam !== false;          // anti-cheat: leaving the screen submits the exam
+    if (strict && saved) { toast('🛡️ Strict exams cannot be resumed after leaving them'); Resume.clear(); return; }
+    enterPlay(!strict);
     const E = { cur: 0, ans: {}, flags: {}, orders: {}, t0: Date.now(), deadline: Date.now() + n * st.settings.examSecs * 1000, qStart: Date.now(), time: {} };
     cfg.ids.forEach(id => E.orders[id] = optOrder(Q[id], false));
     if (saved) Object.assign(E, saved.E, { t0: Date.now() - saved.el, deadline: Date.now() + Math.max(5000, saved.left), qStart: Date.now() });
     let timer, submitted = false;
     const answeredN = () => Object.keys(E.ans).filter(k => Array.isArray(E.ans[k]) ? E.ans[k].length : E.ans[k] !== undefined).length;
-    Resume.track(() => submitted ? null : {
+    Resume.track(() => submitted || strict ? null : {
       kind: 'exam', label: 'Exam Simulator · ' + cfg.scope, cfg,
       prog: `${answeredN()} of ${n} answered · ${Math.max(0, Math.round((E.deadline - Date.now()) / 60000))} min left`,
       st: { E, left: E.deadline - Date.now(), el: Date.now() - E.t0 }
@@ -598,18 +600,21 @@
       $$('[data-i]', m).forEach(b => b.onclick = () => { m.close(); move(+b.dataset.i); });
       $('#sub', m).onclick = () => { m.close(); submitAsk(); };
     }
-    async function submitAsk() {
+    async function submitAsk(quit) {
       const un = n - answeredN();
-      if (await confirmBox('Submit exam?', un ? `${un} question${un > 1 ? 's are' : ' is'} unanswered and will count as wrong.` : 'All questions answered.', 'Submit', 'Keep working')) submit();
+      if (await confirmBox(quit ? 'End the exam now?' : 'Submit exam?', (quit ? 'Strict exam: it is submitted now. ' : '') + (un ? `${un} question${un > 1 ? 's are' : ' is'} unanswered and will count as wrong.` : 'All questions answered.'), 'Submit', 'Keep working')) submit();
     }
     function tick() {
       const left = E.deadline - Date.now(), el = $('#etime');
       if (el) { const s = Math.max(0, Math.ceil(left / 1000)); el.textContent = `⏱ ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; el.classList.toggle('low', left < 60000); }
       if (left <= 0) { toast('⏰ Time is up — exam submitted'); submit(); }
     }
-    function submit() {
+    function submit(cheat) {
       if (submitted) return; submitted = true;
       clearInterval(timer); stopKeys(); App.setLeaveGuard(null); Resume.done();
+      if (window.Exam) Exam.Guard.stop();
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => { });
+      if (cheat) { if (location.hash !== '#/play') history.pushState(null, '', '#/play'); document.body.classList.add('playing'); FX.buzz([200, 80, 200]); }
       const answers = cfg.ids.map(id => {
         const q = Q[id], multi = Store.multi(q);
         const oi = multi ? (E.ans[id] || []) : (E.ans[id] ?? -1);
@@ -625,7 +630,7 @@
       if (p >= 80) { FX.confetti(); FX.play('win'); } else FX.play(p >= 50 ? 'correct' : 'lose');
       const missed = answers.filter(a => !a.ok).map(a => a.id);
       view().innerHTML = `<div class="results"><div class="card glow res-hero"><div class="res-ring">${ring(p / 100, 150, 12, '')}<div class="res-in"><b>${p}%</b></div></div>
-        <h2>${p >= 80 ? 'Pass-level performance 🎓' : p >= 65 ? 'Close — keep pushing 📈' : 'More practice needed 🔁'}</h2><p class="muted">${c} / ${n} correct · ${fmtMs(Date.now() - E.t0)}</p>${best ? '<div class="pill gold">🏆 New best exam score!</div>' : ''}</div>
+        ${cheat ? `<div class="pill bad">⛔ Exam ended: ${esc(cheat)}</div>` : ''}<h2>${p >= 80 ? 'Pass-level performance 🎓' : p >= 65 ? 'Close — keep pushing 📈' : 'More practice needed 🔁'}</h2><p class="muted">${c} / ${n} correct · ${fmtMs(Date.now() - E.t0)}</p>${best ? '<div class="pill gold">🏆 New best exam score!</div>' : ''}</div>
         <div class="res-actions">${missed.length ? `<button class="btn" id="rm">🔁 Retry the ${missed.length} missed</button>` : ''}<button class="btn ghost" id="new">New exam</button><button class="btn ghost" id="done">Done</button></div>${reviewList(answers)}</div>`;
       animateRings(view()); Explain.scan(view());
       if ($('#rm')) $('#rm').onclick = () => quiz(Object.assign({}, cfg, { modeId: 'challenge', title: 'Retry missed', ids: shuffle(missed), feedback: 'instant', challenge: true, retry: true }));
@@ -639,9 +644,27 @@
       else if (k === 'arrowright' || k === 'enter') $('#nxt') && $('#nxt').click();
       else if (k === 'arrowleft') $('#prev') && $('#prev').click();
     });
-    draw();
-    const sid = String(++SID); view().dataset.sid = sid;
-    timer = setInterval(() => { if (view().dataset.sid !== sid) return clearInterval(timer); tick(); }, 500);
+    const go = () => {
+      draw();
+      const sid = String(++SID); view().dataset.sid = sid;
+      timer = setInterval(() => { if (view().dataset.sid !== sid && !strict) return clearInterval(timer); if (!submitted) tick(); }, 500);
+    };
+    if (!strict) return go();
+    // strict: a start screen (the tap also enters full screen), then the guard runs until the exam is submitted
+    view().innerHTML = `<div class="play exam"><section class="card glow exp-join strict-start">
+      <div class="exp-big">🛡️</div><h2>Strict exam</h2><p class="muted">${n} questions · ${Math.round(n * st.settings.examSecs / 60)} min</p>
+      <div class="exp-rules"><h3>⚠️ Anti-cheat rules</h3><ul>
+        <li>From the moment you press Start, <b>anything that takes the screen away from the exam submits it at once</b>: switching apps, the notification panel, a call or call screen, locking the phone, split screen or pop-up windows, leaving full screen, going back or reloading.</li>
+        <li>Turn on <b>Do Not Disturb</b> (or airplane mode) before you start.</li>
+        <li>Strict mode can be turned off in Settings (for relaxed practice).</li></ul></div>
+      <div class="row gap center-row"><button class="btn ghost" id="sCancel">Cancel</button><button class="btn big-go" id="sGo">▶ Start the exam</button></div></section></div>`;
+    $('#sCancel').onclick = () => exitPlay(backHash(cfg));
+    $('#sGo').onclick = () => {
+      try { if (!document.fullscreenElement && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => { }); } catch (e) { }
+      E.t0 = E.qStart = Date.now(); E.deadline = Date.now() + n * st.settings.examSecs * 1000;
+      go();
+      Exam.Guard.start(reason => submit(reason), { hash: h => h === '#/play', settle: 1200 });
+    };
   }
 
   // ---------- learn ----------

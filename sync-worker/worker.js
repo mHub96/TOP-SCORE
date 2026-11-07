@@ -94,6 +94,14 @@ async function exTick(env, e) {
   for (let g = 0; g < 3 && e && e.status === 'running' && now() >= exAdvanceAt(e); g++) { await exStep(env, e); e = await exLoad(env, 'id', e.id); }
   return e;
 }
+/* heartbeat: a phone that stops checking in while the exam runs (app in the background, closed, frozen) is out */
+const EX_SILENT = 10000;
+async function exStale(env, e) {
+  if (!e || e.status !== 'running') return e;
+  const r = await env.DB.prepare("UPDATE exam_players SET status = 'left', reason = 'stopped responding (app left, closed or offline)', ended = ? WHERE exam_id = ? AND status = 'in' AND COALESCE(seen, 0) < ?").bind(now(), e.id, now() - EX_SILENT).run();
+  if (r.meta.changes) { await exCheckAll(env, e, false); e = await exLoad(env, 'id', e.id); }
+  return e;
+}
 async function exEnd(env, e, why) {
   const t = now();
   await env.DB.prepare("UPDATE exams SET status = 'done', ended = ?, all_at = NULL WHERE id = ? AND status IN ('lobby', 'running')").bind(t, e.id).run();
@@ -213,7 +221,8 @@ export default {
         let e = await exTick(env, await exLoad(env, 'id', pl.exam_id));
         const t = now();
         if (p === '/api/exam/play' && M === 'GET') {
-          if (t - (pl.seen || 0) > 5000) await env.DB.prepare('UPDATE exam_players SET seen = ? WHERE id = ?').bind(t, pl.id).run();
+          if (t - (pl.seen || 0) > 2500) await env.DB.prepare('UPDATE exam_players SET seen = ? WHERE id = ?').bind(t, pl.id).run();
+          e = await exStale(env, e);
           const me2 = await env.DB.prepare('SELECT status, reason, name FROM exam_players WHERE id = ?').bind(pl.id).first();
           const out = Object.assign(exPublic(e, t), { me: me2 });
           if (e.status === 'lobby') out.lobby = (await env.DB.prepare("SELECT name FROM exam_players WHERE exam_id = ? AND status = 'in' ORDER BY id").bind(e.id).all()).results.map(x => x.name);
@@ -340,6 +349,7 @@ export default {
         e = await exTick(env, e);
         const act = em[2], t = now();
         if (!act && M === 'GET') {
+          e = await exStale(env, e);
           const out = Object.assign(exPublic(e, t), { cfg: e.cfg, keys: e.keys });
           const players = (await env.DB.prepare("SELECT id, name, user_id, status, reason, joined, ended, seen FROM exam_players WHERE exam_id = ? AND status != 'kicked' ORDER BY id").bind(e.id).all()).results;
           if (e.status === 'running') {

@@ -307,7 +307,7 @@
   async function play(code) {
     stopPlay();
     code = String(code || '').toUpperCase();
-    document.body.classList.remove('authing');
+    document.body.classList.remove('authing'); document.body.classList.add('exam-mode');
     P = { code, s: JSON.parse(sessionStorage.getItem(PKEY(code)) || 'null'), d: null, view: '', cur: -2, sel: new Set(), busy: false, recorded: false };
     $('#view').innerHTML = `<div class="exp" id="exPlay"><div class="muted center" style="padding:20vh 0">Opening the exam…</div></div>`;
     if (P.s) return playPoll();
@@ -488,12 +488,62 @@
       <p class="muted small">Wrong and unanswered questions are open below with the book’s answer key.</p>`;
   }
 
-  /* ---------- the strict focus guard (only while a question is running) ---------- */
-  let armed = false, base = 0, wasFull = false;
-  const H_ = {};
+  /* ---------- strict anti-cheat guard (exam room phones + strict Exam Simulator) ----------
+     Anything that takes the screen away from the exam ends it. Several independent signals, because phones
+     report these events differently: page hidden, window focus lost (event AND polled every 150 ms),
+     JavaScript paused (the app went to the background), page frozen / closed / reloaded, leaving full screen,
+     the window shrinking (split screen, pop-up / floating window), leaving the exam page. */
+  const Guard = (() => {
+    let on = false, cb = null, base = null, wasFull = false, hadFocus = false, last = 0, iv = null, settle = 0, okHash = null;
+    const h = {};
+    function fire(reason) { if (!on) return; const f = cb; stop(); try { f && f(reason); } catch (e) { console.warn(e); } }
+    function start(onLose, opts = {}) {
+      stop();
+      on = true; cb = onLose; okHash = opts.hash || null;
+      base = { w: innerWidth, h: innerHeight }; wasFull = !!document.fullscreenElement; hadFocus = document.hasFocus(); last = Date.now(); settle = Date.now() + (opts.settle || 0);
+      h.vis = () => { if (document.visibilityState !== 'visible') fire('left the app or the screen turned off'); };
+      h.blur = () => { if (Date.now() > settle) fire('something else took the screen (notification panel, call, another app)'); };
+      h.hide = () => fire('closed, reloaded or left the page');
+      h.freeze = () => fire('the app was sent to the background');
+      h.full = () => {
+        if (document.fullscreenElement) { wasFull = true; settle = Date.now() + 1000; setTimeout(() => { base = { w: innerWidth, h: innerHeight }; }, 900); return; }
+        if (wasFull) fire('left full screen');
+      };
+      h.size = () => {
+        if (Date.now() < settle) { base = { w: innerWidth, h: innerHeight }; return; }
+        const w = innerWidth, hh = innerHeight;
+        const rotated = Math.abs(w - base.h) <= base.h * 0.2 && Math.abs(hh - base.w) <= base.w * 0.2;
+        if (rotated) { base = { w, h: hh }; return; }
+        if (Math.abs(w - base.w) > base.w * 0.08 || hh < base.h * 0.85) fire('split screen or pop-up window');
+      };
+      h.hash = () => { if (okHash && !okHash(location.hash)) fire('left the exam page'); };
+      h.ctx = e => e.preventDefault();
+      document.addEventListener('visibilitychange', h.vis); addEventListener('blur', h.blur); addEventListener('pagehide', h.hide);
+      document.addEventListener('freeze', h.freeze); document.addEventListener('fullscreenchange', h.full);
+      addEventListener('resize', h.size); addEventListener('hashchange', h.hash); document.addEventListener('contextmenu', h.ctx);
+      iv = setInterval(() => {
+        const t = Date.now();
+        if (t - last > 2500) return fire('the app was paused (sent to the background)');
+        last = t;
+        if (document.visibilityState !== 'visible') return fire('left the app or the screen turned off');
+        if (document.hasFocus()) hadFocus = true;
+        else if (hadFocus && t > settle) fire('something else took the screen (notification panel, call, another app)');
+      }, 150);
+      document.body.classList.add('exam-locked');
+    }
+    function stop() {
+      if (!on) return; on = false; clearInterval(iv);
+      document.removeEventListener('visibilitychange', h.vis); removeEventListener('blur', h.blur); removeEventListener('pagehide', h.hide);
+      document.removeEventListener('freeze', h.freeze); document.removeEventListener('fullscreenchange', h.full);
+      removeEventListener('resize', h.size); removeEventListener('hashchange', h.hash); document.removeEventListener('contextmenu', h.ctx);
+      document.body.classList.remove('exam-locked');
+    }
+    return { start, stop, on: () => on };
+  })();
+  const disarm = () => Guard.stop();
+  const arm = () => { if (!Guard.on()) Guard.start(lose, { hash: x => x.startsWith('#/x/') }); };
   function lose(reason) {
-    if (!armed || !P || !P.s) return;
-    disarm();
+    if (!P || !P.s) return;
     const payload = JSON.stringify({ t: P.s.t, left: true, reason });
     const url = Account.API + '/exam/finish';
     let ok = false; try { ok = navigator.sendBeacon && navigator.sendBeacon(url, new Blob([payload], { type: 'text/plain' })); } catch (e) { }
@@ -501,28 +551,6 @@
     FX.buzz([200, 80, 200]);
     if (P.d) { P.d.me = { status: 'left', reason, name: P.s.name }; playResults(); }
     setTimeout(() => P && playPoll(), 1200);
-  }
-  function arm() {
-    if (armed) return;
-    armed = true; base = innerWidth * innerHeight; wasFull = !!document.fullscreenElement;
-    H_.vis = () => { if (document.visibilityState === 'hidden') lose('switched app or locked the phone'); };
-    H_.blur = () => setTimeout(() => { if (armed && !document.hasFocus()) lose('left the exam window'); }, 300);
-    H_.hide = () => lose('closed or reloaded the page');
-    H_.full = () => { if (wasFull && !document.fullscreenElement) lose('left full screen'); };
-    H_.size = () => { if (innerWidth * innerHeight < base * 0.6) lose('split screen or floating window'); };
-    H_.hash = () => { if (!location.hash.startsWith('#/x/')) lose('left the exam page'); };
-    H_.ctx = e => e.preventDefault();
-    document.addEventListener('visibilitychange', H_.vis); addEventListener('blur', H_.blur); addEventListener('pagehide', H_.hide);
-    document.addEventListener('fullscreenchange', H_.full); addEventListener('resize', H_.size); addEventListener('hashchange', H_.hash);
-    document.addEventListener('contextmenu', H_.ctx);
-    document.body.classList.add('exam-locked');
-  }
-  function disarm() {
-    if (!armed) return; armed = false;
-    document.removeEventListener('visibilitychange', H_.vis); removeEventListener('blur', H_.blur); removeEventListener('pagehide', H_.hide);
-    document.removeEventListener('fullscreenchange', H_.full); removeEventListener('resize', H_.size); removeEventListener('hashchange', H_.hash);
-    document.removeEventListener('contextmenu', H_.ctx);
-    document.body.classList.remove('exam-locked');
   }
 
   // =====================================================================================
@@ -547,6 +575,6 @@
 
   App.routes.examroom = arg => { stopPlay(); if (arg) host(+arg); else { stopHost(); setup(); } };
   App.routes.x = arg => { stopHost(); if (!arg) { if (Account.me()) return App.go('#/arena/exam'); return Account.showAuth(); } play(arg); };
-  addEventListener('hashchange', () => { const h = location.hash; if (!h.startsWith('#/examroom/')) stopHost(); if (!h.startsWith('#/x/')) { if (P && !armed) stopPlay(); } });
-  window.Exam = { arenaTab, setup, stopHost, stopPlay };
+  addEventListener('hashchange', () => { const h = location.hash; if (!h.startsWith('#/examroom/')) stopHost(); if (!h.startsWith('#/x/')) { if (P && !Guard.on()) stopPlay(); } });
+  window.Exam = { arenaTab, setup, stopHost, stopPlay, Guard };
 })();
