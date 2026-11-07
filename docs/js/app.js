@@ -111,8 +111,11 @@
       leaveGuard = null;
     }
     const segs = h.split('/').filter(Boolean), path = segs[0] || '', arg = segs.slice(1).join('/');
+    if (!Account.me() && path !== 'x') { Account.showAuth(); return; }     // guests may only use the exam page
+    document.body.classList.toggle('exam-mode', path === 'x' || (path === 'examroom' && !!arg));
+    document.body.classList.toggle('exam-host', path === 'examroom' && !!arg);
     const fn = routes[path || 'home'] || routes.home;
-    const navKey = path === 'ch' || path === 'chapters' ? 'book' : path === 'duel' ? 'arena' : (path || 'home');
+    const navKey = path === 'ch' || path === 'chapters' ? 'book' : ['duel', 'examroom', 'x'].includes(path) ? 'arena' : (path || 'home');
     $$('.nav a').forEach(a => a.classList.toggle('on', a.dataset.r === navKey));
     document.body.classList.toggle('playing', path === 'play');
     const v = view();
@@ -792,11 +795,13 @@
       const s = S().settings; const dark = document.documentElement.getAttribute('data-theme') === 'dark' || (!document.documentElement.getAttribute('data-theme') && matchMedia('(prefers-color-scheme: dark)').matches);
       s.theme = dark ? 'light' : 'dark'; Store.save(); applyTheme(); FX.play('tap');
     };
-    if (!Account.me()) { Account.showAuth(sessionStorage.getItem('ts.relogin') ? 'login' : 'login'); return; }   // private study group: log in first
+    const guestExam = !Account.me() && location.hash.startsWith('#/x/');     // exam room: guests may enter with just a name
+    if (!Account.me() && !guestExam) { Account.showAuth(); return; }   // private study group: log in first
     view().innerHTML = '<div class="boot"><div class="intro-logo spin">📚</div><p class="muted">Opening your bookshelf…</p></div>';
     await Books.ready;
     Store.syncBooks();
     render();
+    if (guestExam) return;
     Sync.start();
     Account.start();
     // request persistent storage on first interaction (reduces chance of eviction)

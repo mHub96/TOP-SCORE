@@ -1,9 +1,9 @@
 /* TOP SCORE service worker — offline-first app shell. Bump VERSION on every deploy. */
-const VERSION = 'topscore-v3.1.0';
+const VERSION = 'topscore-v3.2.0';
 const AUTH = 'topscore-auth';      // holds the login token so push notifications can be fetched while the app is closed
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
-  'js/data.js', 'js/fsrs.js', 'js/books.js', 'js/store.js', 'js/sync.js', 'js/account.js', 'js/explain.js', 'js/fx.js', 'js/charts.js', 'js/app.js', 'js/modes.js',
+  'js/data.js', 'js/fsrs.js', 'js/books.js', 'js/store.js', 'js/sync.js', 'js/account.js', 'js/explain.js', 'js/fx.js', 'js/charts.js', 'js/app.js', 'js/modes.js', 'js/qrcode.js', 'js/exam.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png', 'icons/ts-cover.webp', 'icons/badge-96.png'
 ];
 self.addEventListener('install', e => {
@@ -40,9 +40,11 @@ self.addEventListener('fetch', e => {
    The server sends an empty push (no content passes through Google/Apple); we then fetch the waiting
    notifications from the TOP SCORE server with the stored login token and show them. */
 const API = location.hostname.endsWith('github.io') ? 'https://topscore-sync.topscore-c067b3.workers.dev/api' : 'https://topscore-test.topscore-c067b3.workers.dev/api';
+/* only windows of THIS app: other apps on mhub96.github.io share the origin, so matchAll would return their windows too */
+const ours = async () => (await self.clients.matchAll({ type: 'window', includeUncontrolled: true })).filter(w => w.url.startsWith(self.registration.scope));
 async function token() { try { const r = await (await caches.open(AUTH)).match('token'); return r ? (await r.text()) : ''; } catch (e) { return ''; } }
 self.addEventListener('push', e => e.waitUntil((async () => {
-  const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  const wins = await ours();
   const t = await token();
   let items = [];
   if (t) {
@@ -68,8 +70,8 @@ self.addEventListener('notificationclick', e => {
   e.notification.close();
   const target = new URL('./' + (e.notification.data && e.notification.data.url || ''), self.registration.scope).href;
   e.waitUntil((async () => {
-    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const w of wins) { if ('focus' in w) { await w.focus(); w.postMessage({ type: 'open', url: e.notification.data && e.notification.data.url || '' }); return; } }
+    const wins = await ours();
+    for (const w of wins) { if ('focus' in w) { try { await w.focus(); w.postMessage({ type: 'open', url: e.notification.data && e.notification.data.url || '' }); return; } catch (err) { } } }
     await self.clients.openWindow(target);
   })());
 });

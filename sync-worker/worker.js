@@ -67,6 +67,78 @@ async function notifyOwner(env, ctx, title, body, url) {
   if (o) await notifyUser(env, ctx, o.id, title, body, url);
 }
 
+/* ---------- Exam room (presenter screen + phones) ----------
+   The server keeps the clock: each question starts at q_start; it closes at q_start + secs (timer pace),
+   when the examiner presses Next, or 3 s after every remaining player has answered (all_at + 3000).
+   State moves forward lazily on every request (no background jobs). Question text never passes through
+   the server: only question ids, option counts and the answer keys (kept server-side until the end). */
+const EX_ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const exCode = () => [...crypto.getRandomValues(new Uint8Array(6))].map(b => EX_ALPHA[b % EX_ALPHA.length]).join('');
+const exParse = e => { if (!e) return null; e.cfg = JSON.parse(e.cfg); e.keys = JSON.parse(e.keys); e.n = e.cfg.ids.length; return e; };
+const exLoad = async (env, col, v) => exParse(await env.DB.prepare(`SELECT * FROM exams WHERE ${col} = ?`).bind(v).first());
+const exDeadline = e => e.status === 'running' && e.cfg.pace === 'timer' ? e.q_start + e.cfg.secs * 1000 : null;
+function exAdvanceAt(e) {
+  if (e.status !== 'running') return Infinity;
+  let t = exDeadline(e) || Infinity;
+  if (e.cfg.auto && e.all_at) t = Math.min(t, e.all_at + 3000);
+  return t;
+}
+async function exStep(env, e) {
+  const t = now();
+  if (e.cur + 1 >= e.n) {
+    const r = await env.DB.prepare("UPDATE exams SET status = 'done', ended = ?, all_at = NULL WHERE id = ? AND cur = ? AND status = 'running'").bind(t, e.id, e.cur).run();
+    if (r.meta.changes) await env.DB.prepare("UPDATE exam_players SET status = 'done', reason = 'completed', ended = ? WHERE exam_id = ? AND status = 'in'").bind(t, e.id).run();
+  } else await env.DB.prepare("UPDATE exams SET cur = cur + 1, q_start = ?, all_at = NULL WHERE id = ? AND cur = ? AND status = 'running'").bind(t, e.id, e.cur).run();
+}
+async function exTick(env, e) {
+  for (let g = 0; g < 3 && e && e.status === 'running' && now() >= exAdvanceAt(e); g++) { await exStep(env, e); e = await exLoad(env, 'id', e.id); }
+  return e;
+}
+async function exEnd(env, e, why) {
+  const t = now();
+  await env.DB.prepare("UPDATE exams SET status = 'done', ended = ?, all_at = NULL WHERE id = ? AND status IN ('lobby', 'running')").bind(t, e.id).run();
+  await env.DB.prepare("UPDATE exam_players SET status = 'done', reason = ?, ended = ? WHERE exam_id = ? AND status = 'in'").bind(why, t, e.id).run();
+}
+/* after an answer / retract / someone leaving: has every player still in the exam answered the current question? */
+async function exCheckAll(env, e, fresh) {
+  if (e.status !== 'running') return;
+  const r = await env.DB.prepare("SELECT (SELECT COUNT(*) FROM exam_players WHERE exam_id = ?1 AND status = 'in') AS n, (SELECT COUNT(*) FROM exam_answers a JOIN exam_players p ON p.id = a.player_id WHERE a.exam_id = ?1 AND a.q = ?2 AND p.status = 'in') AS a").bind(e.id, e.cur).first();
+  if (!r.n) return exEnd(env, e, 'completed');                   // nobody left in the exam
+  const all = r.a >= r.n;
+  if (all && (fresh || !e.all_at)) await env.DB.prepare('UPDATE exams SET all_at = ? WHERE id = ? AND cur = ?').bind(now(), e.id, e.cur).run();
+  if (!all && e.all_at) await env.DB.prepare('UPDATE exams SET all_at = NULL WHERE id = ? AND cur = ?').bind(e.id, e.cur).run();
+}
+const exOk = (e, q, choice) => { const k = e.keys[q] || []; const c = JSON.parse(choice || '[]'); return c.length === k.length && k.every(x => c.includes(x)); };
+async function exBoard(env, e) {
+  const players = (await env.DB.prepare("SELECT id, name, user_id, status, reason, joined, ended, seen FROM exam_players WHERE exam_id = ? AND status != 'kicked' ORDER BY id").bind(e.id).all()).results;
+  const ans = (await env.DB.prepare('SELECT player_id, q, choice, ms FROM exam_answers WHERE exam_id = ?').bind(e.id).all()).results;
+  const by = {}; players.forEach(x => by[x.id] = Object.assign(x, { score: 0, answered: 0, ms: 0 }));
+  for (const a of ans) { const x = by[a.player_id]; if (!x) continue; x.answered++; x.ms += a.ms || 0; if (exOk(e, a.q, a.choice)) x.score++; }
+  const board = players.slice().sort((a, b) => b.score - a.score || a.ms - b.ms);
+  board.forEach((x, i) => x.rank = i && board[i - 1].score === x.score && board[i - 1].ms === x.ms ? board[i - 1].rank : i + 1);
+  return { board, ans };
+}
+const exPublic = (e, t) => ({ id: e.id, code: e.code, title: e.title, status: e.status, cur: e.cur, n: e.n, q_start: e.q_start, deadline: exDeadline(e), all_at: e.cfg.auto ? e.all_at : null, now: t || now(),
+  pace: e.cfg.pace, secs: e.cfg.secs, auto: !!e.cfg.auto, guests: !!e.cfg.guests, book: e.cfg.book, bookTitle: e.cfg.bookTitle, chapters: e.cfg.chapters, next_code: e.next_code || null });
+async function exCreate(env, me, cfg, keys) {
+  const n = Array.isArray(cfg.ids) ? cfg.ids.length : 0;
+  if (!n || n > 300 || !Array.isArray(keys) || keys.length !== n) throw new Error('bad exam');
+  const c = {
+    ids: cfg.ids.map(String), nopts: cfg.ids.map((_, i) => Math.max(2, Math.min(12, +(cfg.nopts || [])[i] || 5))), multi: cfg.ids.map((_, i) => !!(cfg.multi || [])[i]),
+    pace: cfg.pace === 'manual' ? 'manual' : 'timer', secs: Math.max(10, Math.min(600, +cfg.secs || 60)), auto: cfg.auto !== false, guests: cfg.guests !== false,
+    book: String(cfg.book || ''), bookTitle: String(cfg.bookTitle || '').slice(0, 80), chapters: String(cfg.chapters || '').slice(0, 300), chs: (Array.isArray(cfg.chs) ? cfg.chs : []).slice(0, 400).map(String)
+  };
+  const k = keys.map(a => (Array.isArray(a) ? a : [a]).map(Number).filter(x => x >= 0 && x < 12));
+  for (let i = 0; i < 6; i++) {
+    const code = exCode();
+    try {
+      const r = await env.DB.prepare("INSERT INTO exams (code, host_id, title, cfg, keys, status, cur, created) VALUES (?, ?, ?, ?, ?, 'lobby', -1, ?)").bind(code, me.id, String(cfg.title || 'Exam').slice(0, 120), JSON.stringify(c), JSON.stringify(k), now()).run();
+      return { id: r.meta.last_row_id, code };
+    } catch (err) { if (!/UNIQUE/i.test(err.message)) throw err; }
+  }
+  throw new Error('could not create a room code');
+}
+
 export default {
   async fetch(req, env, ctx) {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(req) });
@@ -108,6 +180,91 @@ export default {
         if (!env.ADMIN_KEY || req.headers.get('X-Admin-Key') !== env.ADMIN_KEY) return ERR(req, 'forbidden', 403);
         return packUpload(req, env, p);
       }
+      // ----- exam room: players (account optional; guests allowed when the examiner allows it) -----
+      if (p.startsWith('/api/exam/') && ['/api/exam/info', '/api/exam/join', '/api/exam/play', '/api/exam/answer', '/api/exam/finish', '/api/exam/leave-lobby'].includes(p)) {
+        if (p === '/api/exam/info' && M === 'GET') {
+          const e = await exTick(env, await exLoad(env, 'code', String(url.searchParams.get('code') || '').toUpperCase()));
+          if (!e || e.status === 'closed') return ERR(req, 'No open exam with this code.', 404);
+          const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM exam_players WHERE exam_id = ? AND status != 'kicked'").bind(e.id).first();
+          return J(req, Object.assign(exPublic(e), { players: n.n }));
+        }
+        if (p === '/api/exam/join' && M === 'POST') {
+          const b = await body(req), me = await auth(req, env);
+          const e = await exLoad(env, 'code', String(b.code || '').toUpperCase());
+          if (!e || e.status === 'closed') return ERR(req, 'No open exam with this code.', 404);
+          if (e.status !== 'lobby') return ERR(req, 'This exam has already started — joining is closed.', 403);
+          if (!me && !e.cfg.guests) return ERR(req, 'Log in to your TOP SCORE account to join this exam.', 403);
+          if (me) {
+            const old = await env.DB.prepare("SELECT id, token, name FROM exam_players WHERE exam_id = ? AND user_id = ? AND status = 'in'").bind(e.id, me.id).first();
+            if (old) return J(req, { token: old.token, pid: old.id, name: old.name });
+          }
+          let name = (me ? me.display : String(b.name || '')).replace(/\s+/g, ' ').trim().slice(0, 30);
+          if (name.length < 2) return ERR(req, 'Please type your name (at least 2 letters).');
+          const taken = new Set((await env.DB.prepare("SELECT name FROM exam_players WHERE exam_id = ? AND status != 'kicked'").bind(e.id).all()).results.map(x => x.name.toLowerCase()));
+          let nm = name; for (let i = 2; taken.has(nm.toLowerCase()); i++) nm = `${name} (${i})`;
+          const token = rnd(24);
+          const r = await env.DB.prepare("INSERT INTO exam_players (exam_id, token, name, user_id, status, joined, seen) VALUES (?, ?, ?, ?, 'in', ?, ?)").bind(e.id, token, nm, me ? me.id : null, now(), now()).run();
+          return J(req, { token, pid: r.meta.last_row_id, name: nm });
+        }
+        const b = M === 'GET' ? {} : await body(req);
+        const tok = M === 'GET' ? url.searchParams.get('t') : b.t;
+        const pl = tok && await env.DB.prepare('SELECT * FROM exam_players WHERE token = ?').bind(String(tok)).first();
+        if (!pl) return ERR(req, 'You are not in this exam.', 404);
+        let e = await exTick(env, await exLoad(env, 'id', pl.exam_id));
+        const t = now();
+        if (p === '/api/exam/play' && M === 'GET') {
+          if (t - (pl.seen || 0) > 5000) await env.DB.prepare('UPDATE exam_players SET seen = ? WHERE id = ?').bind(t, pl.id).run();
+          const me2 = await env.DB.prepare('SELECT status, reason, name FROM exam_players WHERE id = ?').bind(pl.id).first();
+          const out = Object.assign(exPublic(e, t), { me: me2 });
+          if (e.status === 'lobby') out.lobby = (await env.DB.prepare("SELECT name FROM exam_players WHERE exam_id = ? AND status = 'in' ORDER BY id").bind(e.id).all()).results.map(x => x.name);
+          if (e.status === 'running' && me2.status === 'in') {
+            const mine = await env.DB.prepare('SELECT choice FROM exam_answers WHERE exam_id = ? AND player_id = ? AND q = ?').bind(e.id, pl.id, e.cur).first();
+            const c = await env.DB.prepare("SELECT (SELECT COUNT(*) FROM exam_players WHERE exam_id = ?1 AND status = 'in') AS n, (SELECT COUNT(*) FROM exam_answers a JOIN exam_players p ON p.id = a.player_id WHERE a.exam_id = ?1 AND a.q = ?2 AND p.status = 'in') AS a").bind(e.id, e.cur).first();
+            Object.assign(out, { q: { id: e.cfg.ids[e.cur], nopts: e.cfg.nopts[e.cur], multi: e.cfg.multi[e.cur] }, mine: mine ? JSON.parse(mine.choice) : null, inN: c.n, answeredN: c.a });
+          }
+          if (me2.status !== 'in' || e.status === 'done' || e.status === 'closed') {
+            const { board, ans } = await exBoard(env, e);
+            const my = board.find(x => x.id === pl.id) || {};
+            out.result = { score: my.score || 0, answered: my.answered || 0, ms: my.ms || 0, n: e.n };
+            if (e.status === 'done' || e.status === 'closed') {        // answer keys only once the whole exam is over (no passing them on)
+              const mineA = {}, msA = {}; ans.filter(a => a.player_id === pl.id).forEach(a => { mineA[a.q] = JSON.parse(a.choice); msA[a.q] = a.ms; });
+              out.result.rank = my.rank; out.result.of = board.length;
+              out.result.review = e.cfg.ids.map((id, i) => ({ id, key: e.keys[i], mine: mineA[i] || null, ok: mineA[i] ? exOk(e, i, JSON.stringify(mineA[i])) : false, ms: msA[i] || null, nopts: e.cfg.nopts[i] }));
+              out.board = board.map(x => ({ name: x.name, score: x.score, answered: x.answered, ms: x.ms, rank: x.rank, status: x.status, reason: x.reason, me: x.id === pl.id }));
+            }
+          }
+          return J(req, out);
+        }
+        if (p === '/api/exam/answer' && M === 'POST') {
+          if (pl.status !== 'in') return ERR(req, 'Your exam is already submitted.', 403);
+          if (!e || e.status !== 'running') return ERR(req, 'The exam is not running.', 409);
+          if (+b.q !== e.cur) return ERR(req, 'Too late — that question is closed.', 409);
+          if (b.choice === null || (Array.isArray(b.choice) && !b.choice.length)) {
+            await env.DB.prepare('DELETE FROM exam_answers WHERE exam_id = ? AND player_id = ? AND q = ?').bind(e.id, pl.id, e.cur).run();
+          } else {
+            const ch = (Array.isArray(b.choice) ? b.choice : [b.choice]).map(Number).filter(x => x >= 0 && x < e.cfg.nopts[e.cur]).sort((a, b) => a - b);
+            if (!ch.length) return ERR(req, 'bad choice');
+            await env.DB.prepare('INSERT INTO exam_answers (exam_id, player_id, q, choice, ms, at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(exam_id, player_id, q) DO UPDATE SET choice = excluded.choice, ms = excluded.ms, at = excluded.at')
+              .bind(e.id, pl.id, e.cur, JSON.stringify([...new Set(ch)]), t - e.q_start, t).run();
+          }
+          await exCheckAll(env, e, true);
+          return J(req, { ok: true });
+        }
+        if (p === '/api/exam/leave-lobby' && M === 'POST') {
+          if (e.status === 'lobby') await env.DB.prepare("UPDATE exam_players SET status = 'kicked', reason = 'left the lobby' WHERE id = ?").bind(pl.id).run();
+          return J(req, { ok: true });
+        }
+        if (p === '/api/exam/finish' && M === 'POST') {           // voluntary finish, or the app lost focus (strict rule)
+          if (pl.status === 'in' && e.status === 'running') {
+            const left = !!b.left;
+            await env.DB.prepare('UPDATE exam_players SET status = ?, reason = ?, ended = ? WHERE id = ?').bind(left ? 'left' : 'done', String(b.reason || (left ? 'left the app' : 'finished early')).slice(0, 80), t, pl.id).run();
+            await exCheckAll(env, e, false);
+          } else if (pl.status === 'in' && e.status === 'lobby') await env.DB.prepare("UPDATE exam_players SET status = 'kicked', reason = 'left the lobby' WHERE id = ?").bind(pl.id).run();
+          return J(req, { ok: true });
+        }
+        return ERR(req, 'not found', 404);
+      }
+
       const me = await auth(req, env);
       if (!me) return ERR(req, 'Please log in.', 401);
 
@@ -165,6 +322,54 @@ export default {
         const rows = await env.DB.prepare('SELECT id, title, body, url, created FROM notifs WHERE user_id = ? AND delivered = 0 AND created > ? ORDER BY id').bind(me.id, now() - 3 * 86400000).all();
         if (rows.results.length) await env.DB.prepare('UPDATE notifs SET delivered = 1 WHERE user_id = ? AND delivered = 0').bind(me.id).run();
         return J(req, { items: rows.results });
+      }
+
+      // ----- exam room: examiner (presenter screen) -----
+      if (p === '/api/exam' && M === 'POST') {
+        const b = await body(req);
+        try { return J(req, await exCreate(env, me, b.cfg || {}, b.keys)); } catch (err) { return ERR(req, err.message); }
+      }
+      if (p === '/api/exam/mine' && M === 'GET') {
+        const rows = (await env.DB.prepare("SELECT id, code, title, status, created, cfg FROM exams WHERE host_id = ? AND status != 'closed' ORDER BY id DESC LIMIT 10").bind(me.id).all()).results;
+        return J(req, { exams: rows.map(r => ({ id: r.id, code: r.code, title: r.title, status: r.status, created: r.created, n: JSON.parse(r.cfg).ids.length })) });
+      }
+      let em;
+      if ((em = p.match(/^\/api\/exam\/(\d+)(?:\/(\w+))?$/))) {
+        let e = await exLoad(env, 'id', +em[1]);
+        if (!e || e.host_id !== me.id) return ERR(req, 'Not your exam.', 404);
+        e = await exTick(env, e);
+        const act = em[2], t = now();
+        if (!act && M === 'GET') {
+          const out = Object.assign(exPublic(e, t), { cfg: e.cfg, keys: e.keys });
+          const players = (await env.DB.prepare("SELECT id, name, user_id, status, reason, joined, ended, seen FROM exam_players WHERE exam_id = ? AND status != 'kicked' ORDER BY id").bind(e.id).all()).results;
+          if (e.status === 'running') {
+            const a = new Set((await env.DB.prepare('SELECT player_id FROM exam_answers WHERE exam_id = ? AND q = ?').bind(e.id, e.cur).all()).results.map(x => x.player_id));
+            players.forEach(x => x.answered = a.has(x.id));
+          }
+          out.players = players;
+          if (e.status === 'done' || e.status === 'closed') { const { board, ans } = await exBoard(env, e); out.board = board; out.answers = ans; }
+          return J(req, out);
+        }
+        if (M !== 'POST') return ERR(req, 'not found', 404);
+        const b = await body(req);
+        if (act === 'start') {
+          const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM exam_players WHERE exam_id = ? AND status = 'in'").bind(e.id).first();
+          if (e.status !== 'lobby') return ERR(req, 'Already started.');
+          if (!n.n) return ERR(req, 'Nobody has entered the exam yet.');
+          await env.DB.prepare("UPDATE exams SET status = 'running', cur = 0, q_start = ?, started = ?, all_at = NULL WHERE id = ? AND status = 'lobby'").bind(t, t, e.id).run();
+        }
+        if (act === 'next' && e.status === 'running') await exStep(env, e);
+        if (act === 'end') await exEnd(env, e, 'exam ended by the examiner');
+        if (act === 'close') { if (e.status !== 'done') await exEnd(env, e, 'exam ended by the examiner'); await env.DB.prepare("UPDATE exams SET status = 'closed' WHERE id = ?").bind(e.id).run(); }
+        if (act === 'kick' && e.status === 'lobby') await env.DB.prepare("UPDATE exam_players SET status = 'kicked', reason = 'removed by the examiner' WHERE id = ? AND exam_id = ?").bind(+b.pid, e.id).run();
+        if (act === 'retake') {
+          const cfg = b.cfg ? Object.assign({}, b.cfg) : Object.assign({ title: e.title }, e.cfg);
+          let r; try { r = await exCreate(env, me, cfg, b.cfg ? b.keys : e.keys); } catch (err) { return ERR(req, err.message); }
+          if (e.status !== 'done') await exEnd(env, e, 'exam ended by the examiner');
+          await env.DB.prepare('UPDATE exams SET next_code = ? WHERE id = ?').bind(r.code, e.id).run();
+          return J(req, r);
+        }
+        return J(req, { ok: true });
       }
 
       // ----- progress -----

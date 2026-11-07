@@ -144,7 +144,7 @@
     }
     saveAcct(Object.assign({ token: r.token }, r.user));
     sessionStorage.removeItem('ts.relogin');
-    location.hash = '#/'; location.reload();
+    location.hash = sessionStorage.getItem('ts.after') || '#/'; sessionStorage.removeItem('ts.after'); location.reload();
   }
   async function logout() {
     if (!await App.confirmBox('Log out?', 'Your progress is saved in your account. Log in again on any device to continue.', 'Log out')) return;
@@ -360,9 +360,10 @@
   // ---------- arena: leaderboard + challenges ----------
   let lbPeriod = 'all', lbMetric = 'xp';
   App.routes.arena = async (arg) => {
-    const v = $('#view'), tab = arg === 'challenges' ? 'challenges' : 'leaders';
-    v.innerHTML = `<div class="page-head"><h1>⚔️ Arena</h1><div class="seg" id="arTab"><button data-t="leaders" class="${tab === 'leaders' ? 'on' : ''}">🏆 Leaderboard</button><button data-t="challenges" class="${tab === 'challenges' ? 'on' : ''}">⚔️ Challenges</button></div></div><div id="arBody" class="muted">Loading…</div>`;
+    const v = $('#view'), tab = ['challenges', 'exam'].includes(arg) ? arg : 'leaders';
+    v.innerHTML = `<div class="page-head"><h1>⚔️ Arena</h1><div class="seg" id="arTab"><button data-t="leaders" class="${tab === 'leaders' ? 'on' : ''}">🏆 Leaderboard</button><button data-t="challenges" class="${tab === 'challenges' ? 'on' : ''}">⚔️ Challenges</button><button data-t="exam" class="${tab === 'exam' ? 'on' : ''}">🖥️ Exam room</button></div></div><div id="arBody" class="muted">Loading…</div>`;
     $$('#arTab button').forEach(b => b.onclick = () => App.go('#/arena/' + b.dataset.t));
+    if (tab === 'exam') return Exam.arenaTab($('#arBody'));
     if (tab === 'leaders') return leaders();
     return challenges();
   };
@@ -505,5 +506,5 @@
     resultHTML: duelResultHTML
   };
 
-  window.Account = { Push, drawPush, api, me, isOwner, showAuth, start, logout, settingsHTML, bindSettings, libraryHTML, bindLibrary, syncLibrary, pollInbox, Duel, OWNER_CREDIT, pwHash };
+  window.Account = { API, Push, drawPush, api, me, isOwner, showAuth, start, logout, settingsHTML, bindSettings, libraryHTML, bindLibrary, syncLibrary, pollInbox, Duel, OWNER_CREDIT, pwHash };
 })();

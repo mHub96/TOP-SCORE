@@ -35,6 +35,11 @@ SCHEMA = [
     'CREATE TABLE IF NOT EXISTS pack_chunks (book_id TEXT, idx INTEGER, data BLOB, PRIMARY KEY (book_id, idx))',
     'CREATE TABLE IF NOT EXISTS push_subs (endpoint TEXT PRIMARY KEY, user_id INTEGER, keys TEXT, created INTEGER)',
     'CREATE TABLE IF NOT EXISTS notifs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, title TEXT, body TEXT, url TEXT, created INTEGER, delivered INTEGER DEFAULT 0)',
+    'CREATE TABLE IF NOT EXISTS exams (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT UNIQUE, host_id INTEGER, title TEXT, cfg TEXT, keys TEXT, status TEXT, cur INTEGER DEFAULT -1, q_start INTEGER, all_at INTEGER, next_code TEXT, created INTEGER, started INTEGER, ended INTEGER)',
+    'CREATE TABLE IF NOT EXISTS exam_players (id INTEGER PRIMARY KEY AUTOINCREMENT, exam_id INTEGER, token TEXT UNIQUE, name TEXT, user_id INTEGER, status TEXT, reason TEXT, joined INTEGER, ended INTEGER, seen INTEGER)',
+    'CREATE INDEX IF NOT EXISTS exam_players_exam ON exam_players (exam_id)',
+    'CREATE TABLE IF NOT EXISTS exam_answers (exam_id INTEGER, player_id INTEGER, q INTEGER, choice TEXT, ms INTEGER, at INTEGER, PRIMARY KEY (exam_id, player_id, q))',
+    'CREATE INDEX IF NOT EXISTS exam_answers_q ON exam_answers (exam_id, q)',
 ]
 for sql in SCHEMA: call('POST', f'/d1/database/{dbid}/query', {'sql': sql})
 # the old code-based sync table had user codes as keys; the account system uses user ids
