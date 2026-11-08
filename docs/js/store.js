@@ -26,7 +26,7 @@
       const ch = CH[key] = { key, bid: b.id, n: c.n, t: c.t, p: c.p || 0, ids: [], keyed: [] };
       c.q.forEach((q, k) => {
         const id = b.id === 'ts' ? c.n + '-' + q.n : b.id + ':' + c.n + '-' + (k + 1);
-        Q[id] = Object.assign({ id, ch: key, bid: b.id, pos: k + 1 }, q);
+        Q[id] = Object.assign({ id, ch: key, bid: b.id, pos: k + 1, own: !!b.design }, q);
         ch.ids.push(id); rec.ids.push(id); ALL.push(id);
         if (isKeyed(Q[id])) { ch.keyed.push(id); rec.keyed.push(id); }
       });
@@ -41,7 +41,7 @@
     for (let i = ALL.length - 1; i >= 0; i--) if (set.has(ALL[i])) ALL.splice(i, 1);
     delete BK[bid];
   }
-  const isKeyed = q => !q.nk && q.a !== undefined && q.a !== null && !(Array.isArray(q.a) && !q.a.length);
+  const isKeyed = q => !q.own && !q.nk && q.a !== undefined && q.a !== null && !(Array.isArray(q.a) && !q.a.length);
   const keyed = id => Q[id] && isKeyed(Q[id]);
   const answers = q => Array.isArray(q.a) ? q.a : (q.a === undefined || q.a === null ? [] : [q.a]);
   const multi = q => Array.isArray(q.a) && q.a.length > 1;
@@ -53,11 +53,39 @@
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   };
 
+  /* Books with their own study design (designs.js) never count towards XP, questions, streaks or the Arena.
+     Case Review confidence lives in S.conf. This also clears anything recorded for those books by earlier versions,
+     in this device's progress and in any copy arriving from a backup or another device. */
+  const OWN_DESIGN = /^(atlas|caserev):/;
+  function purgeOwnDesign(st) {
+    st.conf = st.conf || {};
+    for (const id of Object.keys(st.cards || {})) {
+      if (!OWN_DESIGN.test(id)) continue;
+      const c = st.cards[id];
+      if (c.cf && !st.conf[id]) st.conf[id] = { g: c.cf, ts: c.last || Date.now() };
+      delete st.cards[id];
+    }
+    const firsts = new Set();
+    st.log = (st.log || []).filter(l => {
+      if (!OWN_DESIGN.test(l[1])) return true;
+      const d = st.daily && st.daily[today(l[0] * 1000)];
+      if (d) {
+        d.a = Math.max(0, (d.a || 0) - 1);
+        if (l[2]) d.c = Math.max(0, (d.c || 0) - 1);
+        d.t = Math.max(0, (d.t || 0) - Math.min(l[4] || 0, 300000));
+        if (l[2] && !firsts.has(l[1])) { firsts.add(l[1]); d.xp = Math.max(0, (d.xp || 0) - XP_PER_Q); }
+      }
+      return false;
+    });
+    for (const k in st.daily || {}) if (st.daily[k].mb) { delete st.daily[k].mb.atlas; delete st.daily[k].mb.caserev; }
+    return st;
+  }
+
   function fresh() {
     return {
       v: 1, created: Date.now(),
       settings: { name: '', goal: 40, theme: 'auto', sound: true, haptics: true, recallFirst: false, shuffleOpts: false, examSecs: 72, fontScale: 1 },
-      cards: {}, log: [], daily: {}, xp: 0, ach: {}, flags: {}, skips: {}, sessions: [], best: {}, guide: {},
+      cards: {}, log: [], daily: {}, xp: 0, ach: {}, flags: {}, skips: {}, sessions: [], best: {}, guide: {}, conf: {},
       lastBackup: 0, sinceBackup: 0, backupNag: 0
     };
   }
@@ -65,6 +93,7 @@
   try { S = JSON.parse(localStorage.getItem(KEY)) || fresh(); } catch (e) { S = fresh(); }
   S = Object.assign(fresh(), S);
   S.settings = Object.assign(fresh().settings, S.settings);
+  purgeOwnDesign(S);
   S.xp = xpTotal();
 
   let saveTimer = null;
@@ -178,6 +207,15 @@
     let n = 0; for (const id in S.cards) if (S.cards[id].c > 0) n++;
     return n * XP_PER_Q;
   }
+  /* A reset question is New again, but it stays on record: last = now makes the reset win over older copies when devices
+     merge, and the kept right/wrong counts mean XP and the Arena totals neither drop nor can be earned twice. */
+  const started = id => !!(S.cards[id] && S.cards[id].reps);
+  function resetProgress(ids) {
+    const now = Date.now(); let n = 0;
+    ids.forEach(id => { if (!started(id)) return; const c = S.cards[id]; S.cards[id] = { s: 0, d: 0, due: 0, last: now, reps: 0, lapses: 0, ok: 0, c: c.c || 0, w: c.w || 0 }; n++; });
+    if (n) save(true);
+    return n;
+  }
   // flashcard rating without MCQ (counts as correct unless Again)
   function rate(id, g, mode) { return answer(id, g > 1, { grade: g, mode }); }
 
@@ -219,6 +257,8 @@
 
   /* merge another copy of the progress (other device / backup) into this one; nothing is lost */
   function mergeState(st, opts = {}) {
+    purgeOwnDesign(st);
+    for (const id in st.conf || {}) if (!S.conf[id] || (st.conf[id].ts || 0) > (S.conf[id].ts || 0)) S.conf[id] = st.conf[id];
     for (const id in st.cards || {}) {
       const a = S.cards[id], b = st.cards[id];
       const win = !a || (b.last || 0) > (a.last || 0) ? b : a;   // newest review wins, but a question once answered right stays credited
@@ -240,7 +280,9 @@
     for (const k in st.guide || {}) {        // guided books: furthest step and finished flag survive, newest position wins
       const a = S.guide[k], b = st.guide[k];
       const win = !a || (b.ts || 0) > (a.ts || 0) ? b : a;
-      S.guide[k] = Object.assign({}, win, { max: Math.max(a ? a.max : -1, b.max), fin: (a && a.fin) || b.fin || 0 });
+      const other = win === b ? a : b;
+      if (!other || (win.rs && (other.ts || 0) <= win.rs)) { S.guide[k] = win; continue; }      // reset after the other copy's last step: the reset stands
+      S.guide[k] = Object.assign({}, win, { max: Math.max(a.max, b.max), fin: a.fin || b.fin || 0 });
     }
     for (const k in (st.best || {})) if (!S.best[k] || st.best[k] > S.best[k]) S.best[k] = st.best[k];
     const ss = new Set(S.sessions.map(x => x.ts));
@@ -264,6 +306,7 @@
     } else {
       S = Object.assign(fresh(), st);
       S.settings = Object.assign(fresh().settings, st.settings);
+      purgeOwnDesign(S);
       S.xp = xpTotal();
       Store.S = S;
     }
@@ -282,7 +325,7 @@
 
   window.Store = {
     get S() { return S; }, set S(v) { S = v; },
-    Q, CH, ALL, BK, TIERS, RANKS, chKey, indexBook, unindexBook, syncBooks, keyed, isKeyed, answers, multi, allKeyed,
+    started, resetProgress, Q, CH, ALL, BK, TIERS, RANKS, chKey, indexBook, unindexBook, syncBooks, keyed, isKeyed, answers, multi, allKeyed,
     today, tier, statsOf, chapterStats, bookStats, globalTiers, dueIds, lastTouched, levelInfo, answer, rate, firstCorrect, earned, tally, XP_PER_Q,
     streak, bestStreak, session, setBest, toggleFlag, isFlagged, isSkipped, setSkip, toggleSkip, clearSkips, mergeState, exportData, importData, reset, save, day, storageBytes
   };

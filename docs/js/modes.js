@@ -131,9 +131,9 @@
   }
   function filterIds(ids, f) {
     const st = S(), now = Date.now();
-    if (f === 'new') return ids.filter(id => !st.cards[id]);
-    if (f === 'due') return ids.filter(id => st.cards[id] && st.cards[id].due <= now);
-    if (f === 'mistakes') return ids.filter(id => st.cards[id] && (!st.cards[id].ok || (st.cards[id].w && Store.tier(id) <= 1)));
+    if (f === 'new') return ids.filter(id => !Store.started(id));
+    if (f === 'due') return ids.filter(id => Store.started(id) && st.cards[id].due <= now);
+    if (f === 'mistakes') return ids.filter(id => Store.started(id) && (!st.cards[id].ok || (st.cards[id].w && Store.tier(id) <= 1)));
     if (f === 'flagged') return ids.filter(Store.isFlagged);
     return ids;
   }
@@ -189,8 +189,8 @@
   }
   function smartQueue(ids, n) {
     const st = S(), now = Date.now();
-    const due = ids.filter(id => st.cards[id] && st.cards[id].due <= now).sort((a, b) => FSRS.currentR(st.cards[a]) - FSRS.currentR(st.cards[b]));
-    const fresh = ids.filter(id => !st.cards[id]);
+    const due = ids.filter(id => Store.started(id) && st.cards[id].due <= now).sort((a, b) => FSRS.currentR(st.cards[a]) - FSRS.currentR(st.cards[b]));
+    const fresh = ids.filter(id => !Store.started(id));
     let q = due.slice(0, n);
     if (q.length < n) q = q.concat(fresh.slice(0, n - q.length));  // new cards in book order
     if (q.length < n) { // nothing due/new: practise the least-stable ones

@@ -159,7 +159,7 @@
   /* continue a partly finished chapter: saved chapter session if any, else the unseen questions in book order */
   function continueChapter(key) {
     if (Modes.resume.chapter(key)) return Modes.resume.runChapter(key);
-    const left = CH[key].keyed.filter(id => !S().cards[id]);
+    const left = CH[key].keyed.filter(id => !Store.started(id));
     if (!left.length) return Modes.start('challenge', { chapters: [key] });
     Modes.start('challenge', { chapters: [key], filter: 'new', fromChapter: key });
   }
@@ -345,6 +345,20 @@
     inp.click();
   }
 
+  // ---------- reset progress (book or chapter) ----------
+  async function askReset(name, ids, keys, word) {
+    const n = ids.filter(Store.started).length;
+    if (!n) { toast('Nothing to reset here yet.'); return; }
+    const ok = await confirmBox(`Reset ${name}?`, `${n.toLocaleString()} question${n === 1 ? '' : 's'} will go back to New, with their review schedule and mastery cleared, and any saved session in this ${word} will be forgotten. This can't be undone. Your XP, Arena answered and correct totals, stars and skips stay. Arena Known and Mastered counts go down.`, 'Reset');
+    if (!ok) return;
+    Store.resetProgress(ids);
+    keys.forEach(k => Modes.resume.clearChapter(k));
+    const s = Modes.resume.get(), cs = s && ((s.cfg && s.cfg.chapters) || (s.kind === 'learn' ? [s.n] : null));
+    if (s && (cs ? cs.some(k => keys.includes(String(k))) : s.cfg && s.cfg.bid && CH[keys[0]] && s.cfg.bid === CH[keys[0]].bid)) Modes.resume.clear();
+    toast(`↺ ${n.toLocaleString()} question${n === 1 ? '' : 's'} reset`);
+    render();
+  }
+
   // ---------- book page ----------
   routes.chapters = () => go('#/book/' + bookId());
   routes.book = (arg) => {
@@ -380,6 +394,7 @@
           ${nextKey ? `<button class="btn ghost" data-chnext="${esc(nextKey)}">▶ Continue: ${chShort(nextKey)}</button>` : ''}
           ${b.type === 'study' ? '' : '<button class="btn ghost" data-bgo="exam">⏱️ Exam</button>'}
           <a class="btn ghost" href="#/stats">📊 Stats</a>
+          <button class="btn ghost" id="rstBook">↺ Reset book</button>
         </div>
       </section>
       ${chapterResumeList(b.id, 3)}
@@ -395,6 +410,7 @@
         <div class="ch-grid">${ks.map(k => chCard(k)).join('')}</div></section>`;
       }).join('')}</div>`;
     $$('[data-bgo]').forEach(x => x.onclick = () => Modes.setup(x.dataset.bgo));
+    $('#rstBook').onclick = () => askReset(esc(b.short), Store.BK[b.id].ids, keys, 'book');
     if ($('#clrSkips')) $('#clrSkips').onclick = async () => {
       if (await confirmBox('Clear all skips in this book?', `${st.skipped} question${st.skipped > 1 ? 's' : ''} will be asked again in every mode.`, 'Clear skips')) {
         const n = Store.clearSkips(Store.BK[b.id].ids); toast(`⏭ ${n} question${n === 1 ? '' : 's'} un-skipped`); render();
@@ -454,6 +470,7 @@
         ${saved ? `<div class="ch-cont card"><div class="grow"><b>▶ Continue where you stopped</b><div class="muted small">${esc(saved.label.split(' · ')[0])} · ${esc(saved.prog || '')} · ${ago(saved.ts)}</div></div><button class="btn" data-chres="${esc(key)}">Continue</button><button class="icon-btn" data-chres-x="${esc(key)}" aria-label="Forget">✕</button></div>`
         : (cs.seen > 0 && cs.seen < cs.total ? `<div class="ch-cont card"><div class="grow"><b>▶ Continue this chapter</b><div class="muted small">${cs.total - cs.seen} questions you haven't answered yet</div></div><button class="btn" data-chnext="${esc(key)}">Continue</button></div>` : '')}
         <div class="row between mt">${idx > 0 ? `<a class="chip" href="#/ch/${encodeURIComponent(keys[idx - 1])}">‹ Ch ${CH[keys[idx - 1]].n}</a>` : '<span></span>'}${idx < keys.length - 1 ? `<a class="chip" href="#/ch/${encodeURIComponent(keys[idx + 1])}">Ch ${CH[keys[idx + 1]].n} ›</a>` : ''}</div>
+        <div class="row end mt-s"><button class="btn ghost sm" id="rstCh">↺ Reset chapter</button></div>
       </section>
       ${studyBar(b, key)}
       <h2 class="sec-h">Study this chapter</h2>
@@ -466,6 +483,7 @@
         ${stemHTML(q)}${optsPrev(q)}
         ${refLine(q)}${noteLine(q)}${bookExpHTML(q)}<div class="xp" data-q="${id}"></div></details>`; }).join('')}</div>`;
     $$('[data-mode]').forEach(x => x.onclick = () => Modes.start(x.dataset.mode, { chapters: [key], fromChapter: key }));
+    $('#rstCh').onclick = () => askReset('Chapter ' + ch.n, ch.ids, [key], 'chapter');
     $$('[data-skip]').forEach(x => x.onclick = e => { e.preventDefault(); const on = Store.toggleSkip(x.dataset.skip); x.classList.toggle('on', on); x.textContent = on ? '⏭ Skipped — tap to un-skip' : '⏭ Skip this question'; FX.play('tap'); });
     if ($('#clrChSkips')) $('#clrChSkips').onclick = () => { const n = Store.clearSkips(ch.ids); toast(`⏭ ${n} un-skipped`); render(); };
     Explain.scan(view());
@@ -572,12 +590,14 @@
         if (hay.includes(q)) { res.push(x); if (res.length >= 80) break; }
       }
       const hl = s => s.replace(new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')(?![^<]*>)', 'gi'), '<mark>$1</mark>');
+      const titleTerms = queryTerms(q), titleHits = Object.keys(CH).filter(k => (scope === 'all' || CH[k].bid === scope) && Books.get(CH[k].bid) && titleTerms.every(t => strip(CH[k].t).toLowerCase().includes(t))).slice(0, 25);
+      const titleRows = titleHits.map(k => `<a class="card s-item note-hit" href="#/ch/${encodeURIComponent(k)}"><div class="muted small">${esc(Books.get(CH[k].bid).short)}</div><div class="s-stem"><span class="num">${CH[k].n}</span> ${markTerms(CH[k].t, titleTerms)}</div></a>`).join('');
       let noteTotal = 0, noteRows = '';
       Books.list().filter(b => b.type === 'study' && (scope === 'all' || b.id === scope)).forEach(b => {
         const r = noteHits(b, q, 30); noteTotal += r.total;
         noteRows += r.hits.map(n => noteHitHTML(n, r.terms)).join('');
       });
-      $('#sres').innerHTML = `<p class="muted small">${res.length >= 80 ? '80+' : res.length} questions · ${noteTotal} reading sections</p>` + noteRows + res.map(x => `
+      $('#sres').innerHTML = `<p class="muted small">${titleHits.length} chapter${titleHits.length === 1 ? '' : 's'} · ${noteTotal} reading sections · ${res.length >= 80 ? '80+' : res.length} questions</p>` + titleRows + noteRows + res.map(x => `
         <div class="card s-item"><div class="muted small"><a href="#/ch/${encodeURIComponent(x.ch)}">${chTitle(x.ch)}</a> · Q${x.n}</div><div class="s-stem">${hl(x.s || strip(x.g || ''))}${x.img ? ' 🖼️' : ''}</div>
         <div class="s-ans">${x.open ? hl(esc(strip(x.o[0]).slice(0, 260))) + (strip(x.o[0]).length > 260 ? '…' : '') : x.nk ? '— no key in the book' : '✅ ' + correctSet(x).map(i => L(i) + '. ' + hl(optText(x, i))).join(' · ')}</div></div>`).join('');
     };
@@ -679,7 +699,7 @@
     const cal = [1, 2, 3].map(k => { const ls = log.filter(l => l[5] === k); return { label: ['Guess', 'Likely', 'Sure'][k - 1], v: ls.length ? Math.round(ls.filter(l => l[2]).length / ls.length * 100) : 0, n: ls.length }; });
     if (cal.some(c => c.n)) Charts.bars($('#cCal'), cal.map(c => ({ label: c.label, v: c.v, tip: `${c.label}: ${c.v}% correct (${c.n} answers)` })), { label: 'Calibration', h: 180 });
     else $('#cCal').innerHTML = '<div class="chart-empty">🎚️ Play Confidence mode to see your calibration.</div>';
-    const tough = ids.filter(id => st.cards[id] && st.cards[id].w).sort((a, b) => (st.cards[b].w - (st.cards[b].c || 0) * 0.5) - (st.cards[a].w - (st.cards[a].c || 0) * 0.5)).slice(0, 8);
+    const tough = ids.filter(id => Store.started(id) && st.cards[id].w).sort((a, b) => (st.cards[b].w - (st.cards[b].c || 0) * 0.5) - (st.cards[a].w - (st.cards[a].c || 0) * 0.5)).slice(0, 8);
     $('#tough').innerHTML = tough.map(id => `<details class="q-prev"><summary><span class="pill bad">✗${st.cards[id].w}</span><span class="grow">${Q[id].s || strip(Q[id].g || '')}</span></summary>${stemHTML(Q[id])}<div class="s-ans">✅ ${correctSet(Q[id]).map(i => L(i) + '. ' + optText(Q[id], i)).join(' · ')}</div><div class="muted small">${chTitle(Q[id].ch)}</div></details>`).join('') || '<p class="muted">Nothing missed yet. 💪</p>';
   };
 

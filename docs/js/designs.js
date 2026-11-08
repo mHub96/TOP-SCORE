@@ -16,6 +16,15 @@
     const [name, w, h, cap] = f;
     return `<figure class="ds-fig"><button class="qimg" data-bid="${b.id}" data-src="${esc(name)}" aria-label="Enlarge figure"><img src="${Books.url(b.id, name)}" width="${w}" height="${h}" alt="Figure"></button>${!cap ? '' : hideCaption ? `<details class="ds-cap"><summary>Show caption</summary>${cap}</details>` : `<figcaption>${cap}</figcaption>`}</figure>`;
   }
+  /* reset: study position or confidence ratings only; these books never touch XP or the Arena */
+  async function askReset(title, n, text, run) {
+    if (!n) { toast('Nothing to reset here yet.'); return; }
+    if (!await App.confirmBox(title, text + " This can't be undone.", 'Reset')) return;
+    run(); Store.save(); toast('↺ Progress reset'); App.render();
+  }
+  const resetGuide = keys => keys.forEach(k => { S().guide = S().guide || {}; const now = Date.now(); S().guide[k] = { at: 0, max: -1, fin: 0, ts: now, rs: now }; });
+  const guideStarted = keys => keys.filter(k => { const g = gState(k); return g.max >= 0 || g.fin; }).length;
+  const resetConf = ids => { const now = Date.now(); ids.forEach(id => { if (confOf(id)) S().conf[id] = { g: 0, ts: now }; }); };
   const hero = (b, side) => `<a class="back" href="#/">‹ Bookshelf</a>
     <section class="card glow book-hero" style="--bc:${b.color || '#6d4cff'}">
       ${Books.cover(b.id) ? `<div class="bh-cover has-img"><img src="${Books.cover(b.id)}" alt="${esc(b.title)} cover"></div>` : ''}
@@ -23,11 +32,15 @@
     </section>`;
   function bindSearch(b) {
     $('#dsFind').oninput = e => {
-      const q = e.target.value.toLowerCase().trim(), box = $('#dsHits'), r = q.length > 1 ? App.noteHits(b, q, 1e5) : { total: 0, hits: [], terms: [] };
-      box.innerHTML = q.length > 1 ? `<p class="muted small">${r.total} section${r.total === 1 ? '' : 's'} found</p>` + r.hits.slice(0, 15).map(n => App.noteHitHTML(n, r.terms)).join('') : '';
-      const keys = new Set(r.hits.map(h => h.key));
-      document.querySelectorAll('#dsList .ch-card').forEach(c => c.style.display = !q || c.dataset.t.includes(q) || keys.has(c.dataset.key) ? '' : 'none');
-      document.querySelectorAll('#dsList .part').forEach(p => p.style.display = [...p.querySelectorAll('.ch-card')].some(c => c.style.display !== 'none') ? '' : 'none');
+      const q = e.target.value.toLowerCase().trim(), box = $('#dsHits'), list = $('#dsList');
+      list.style.display = q ? 'none' : '';                 // while searching, results replace the list: titles first, then sections
+      if (!q) { box.innerHTML = ''; return; }
+      const terms = q.split(/\s+/).filter(Boolean), titles = [...list.querySelectorAll('.ch-card')].filter(c => terms.every(t => c.dataset.t.includes(t)));
+      const r = q.length > 1 ? App.noteHits(b, q, 15) : { total: 0, hits: [], terms };
+      const head = (t, n) => `<h3 class="ds-hh">${t} <small class="muted">${n}</small></h3>`;
+      box.innerHTML = (titles.length ? head(b.design === 'case' ? 'Cases' : 'Chapters', titles.length) + titles.map(c => c.outerHTML).join('') : '')
+        + (r.total ? head('Related sections', r.total) + r.hits.map(n => App.noteHitHTML(n, r.terms)).join('') : '')
+        || '<p class="muted center">No matches.</p>';
     };
   }
   const listBy = (b, card) => `<div id="dsList">${b.parts.map((p, pi) => {
@@ -49,13 +62,14 @@
     const t = guidedTotals(b), keys = App.chKeys(b.id), next = keys.find(k => !gState(k).fin);
     const nextG = next ? gState(next) : null;
     view().innerHTML = hero(b, `<div class="bh-rings"><div>${ring(t.done, 74, 7, pct(t.done))}<small>studied</small></div><div class="grow"><div class="kv"><span>Approaches</span><b>${keys.length}</b></div><div class="kv"><span>Steps seen</span><b>${t.seen} / ${t.total}</b></div></div></div>
-        ${next ? `<div class="row gap wrap mt"><a class="btn" href="#/guide/${enc(next)}~${Math.max(0, nextG.at)}">▶ ${nextG.max >= 0 ? 'Continue' : 'Start'}: ${esc(App.strip(CH[next].t))}</a></div>` : ''}`) + `
+        <div class="row gap wrap mt">${next ? `<a class="btn" href="#/guide/${enc(next)}~${Math.max(0, nextG.at)}">▶ ${nextG.max >= 0 ? 'Continue' : 'Start'}: ${esc(App.strip(CH[next].t))}</a>` : ''}<button class="btn ghost" id="rstBook">↺ Reset book</button></div>`) + `
       <div class="page-head"><input class="search" id="dsFind" placeholder="${esc(b.searchHint || 'Search…')}" autocomplete="off"></div><div id="dsHits"></div>
       ${listBy(b, k => {
         const g = gState(k), n = gSteps(b, k).length, c = chOf(b, k), dn = g.fin ? n : Math.min(n, g.max + 1);
         return `<a class="ch-card card" href="#/ch/${enc(k)}" data-key="${esc(k)}" data-t="${esc(App.strip(CH[k].t).toLowerCase())} ${CH[k].n}">${ring(n ? dn / n : 0, 50, 5, pct(n ? dn / n : 0))}<div class="grow"><div class="ch-t"><span class="num">${CH[k].n}</span>${CH[k].t}</div><div class="muted small">${n} steps${c.video ? ' · 🎬 video' : ''}${g.fin ? ' · ✓ done' : ''}</div></div><span class="chev">›</span></a>`;
       })}`;
     bindSearch(b);
+    $('#rstBook').onclick = () => { const n = guideStarted(keys); askReset(`Reset ${esc(b.short)}?`, n, `Your place in ${n} approach${n === 1 ? '' : 'es'} will be cleared.`, () => resetGuide(keys)); };
   }
   function guidedChapter(b, key) {
     const steps = gSteps(b, key), g = gState(key), keys = App.chKeys(b.id), i = keys.indexOf(key), n = steps.length, c = CH[key];
@@ -64,9 +78,11 @@
         <div class="eyebrow">${esc(b.parts[c.p] || '')}</div><h1><span class="num big">${c.n}</span> ${c.t}</h1>
         <div class="row gap wrap mt"><a class="btn" href="#/guide/${enc(key)}~${g.fin ? 0 : Math.max(0, g.at)}">▶ ${g.fin ? 'Go through again' : g.max >= 0 ? `Continue · step ${g.at + 1}` : 'Start step by step'}</a></div>
         ${prevNext(keys, i, 'Ch')}
+        <div class="row end mt-s"><button class="btn ghost sm" id="rstCh">↺ Reset chapter</button></div>
       </section>
       <h2 class="sec-h">Steps</h2>
       <div class="ds-outline card">${steps.map((s, k) => `<a class="list-item" href="#/guide/${enc(key)}~${k}"><span class="num">${k + 1}</span><span class="grow">${esc(s.h)}${s.figs && s.figs.length ? ` <small class="muted">🖼️ ${s.figs.length}</small>` : ''}</span>${g.fin || k <= g.max ? '<span class="ds-tick">✓</span>' : ''}</a>`).join('')}</div>`;
+    $('#rstCh').onclick = () => askReset(`Reset chapter ${c.n}?`, guideStarted([key]), 'Your place and finished status in this chapter will be cleared.', () => resetGuide([key]));
   }
   let guideKeys = null;
   routes.guide = (arg) => {
@@ -114,16 +130,16 @@
 
   // ================= case: question, Show answer, confidence =================
   const CONF = [[1, 'Not confident'], [2, 'Slightly confident'], [3, 'Mostly confident'], [4, 'Fully confident']];
-  const confOf = id => (S().cards[id] || {}).cf || 0;
+  const confOf = id => ((S().conf || {})[id] || {}).g || 0;
   const isWeak = id => confOf(id) === 1 || confOf(id) === 2;
   const weakIn = ids => ids.filter(isWeak);
   const caseIds = key => CH[key] ? CH[key].ids : [];
   const allIds = b => Store.BK[b.id].ids;
   const pill = g => g ? `<span class="ds-pill c${g}">${CONF[g - 1][1]}</span>` : '';
   function rate(id, g) {
-    Store.rate(id, g, 'case');
-    S().cards[id].cf = g;                     // stored on the question's card, so it syncs between devices with it
-    Store.save(); App.checkAch({});
+    S().conf = S().conf || {};
+    S().conf[id] = { g, ts: Date.now() };       // kept apart from the question cards: no XP, score, streak or Arena effect; syncs between devices
+    Store.save();
   }
   const confRow = (id, mine) => `<div class="ds-conf"><div class="small muted">How confident were you in your answer?</div><div class="ds-confs">${CONF.map(([g, t]) => `<button class="c${g} ${mine === g ? 'on' : ''}" data-rate="${g}" data-id="${esc(id)}">${t}</button>`).join('')}</div></div>`;
   const answerHTML = (b, q) => `<div class="ds-answer">${q.o[0]}${(q.ef || []).map(f => fig(b, f)).join('')}<div class="src">📖 ${esc(q.r)}</div></div>`;
@@ -143,13 +159,14 @@
     const ids = allIds(b), keys = App.chKeys(b.id), rated = ids.filter(confOf).length, weak = weakIn(ids).length;
     const next = keys.find(k => caseIds(k).some(id => !confOf(id)));
     view().innerHTML = hero(b, `<div class="bh-rings"><div>${ring(ids.length ? rated / ids.length : 0, 74, 7, pct(ids.length ? rated / ids.length : 0))}<small>answered</small></div><div class="grow"><div class="kv"><span>Cases</span><b>${keys.length}</b></div><div class="kv"><span>Questions</span><b>${ids.length.toLocaleString()}</b></div><div class="kv"><span>Weak points</span><b>${weak}</b></div></div></div>
-      <div class="row gap wrap mt">${next ? `<a class="btn" href="#/ch/${enc(next)}">▶ Continue: Case ${CH[next].n}</a>` : ''}${weak ? `<a class="btn ghost" href="#/revise/${b.id}">🎯 Revise weak points · ${weak}</a>` : ''}</div>`) + `
+      <div class="row gap wrap mt">${next ? `<a class="btn" href="#/ch/${enc(next)}">▶ Continue: Case ${CH[next].n}</a>` : ''}${weak ? `<a class="btn ghost" href="#/revise/${b.id}">🎯 Revise weak points · ${weak}</a>` : ''}<button class="btn ghost" id="rstBook">↺ Reset book</button></div>`) + `
       <div class="page-head"><input class="search" id="dsFind" placeholder="${esc(b.searchHint || 'Search…')}" autocomplete="off"></div><div id="dsHits"></div>
       ${listBy(b, k => {
         const qs = caseIds(k), r = qs.filter(confOf).length, w = weakIn(qs).length;
         return `<a class="ch-card card" href="#/ch/${enc(k)}" data-key="${esc(k)}" data-t="${esc(App.strip(CH[k].t).toLowerCase())} ${CH[k].n}">${ring(qs.length ? r / qs.length : 0, 50, 5, pct(qs.length ? r / qs.length : 0))}<div class="grow"><div class="ch-t"><span class="num">${CH[k].n}</span>${CH[k].t}</div><div class="muted small">${r} of ${qs.length} questions${w ? ` · <span class="pill warn">${w} weak</span>` : ''}</div></div><span class="chev">›</span></a>`;
       })}`;
     bindSearch(b);
+    $('#rstBook').onclick = () => askReset(`Reset ${esc(b.short)}?`, rated, `All ${rated.toLocaleString()} confidence ratings will be cleared, so every case starts fresh and the weak points list empties.`, () => resetConf(ids));
   }
 
   let sess = null;
@@ -193,7 +210,8 @@
       <header class="page-head"><div class="eyebrow">${esc(b.parts[ch.p] || '')}</div><h1><span class="num big">${ch.n}</span> ${ch.t}</h1>${c.by ? `<div class="muted small">${esc(c.by)}</div>` : ''}</header>
       <section class="card ds-pres"><h2>Clinical Presentation</h2>${c.pres || ''}${(c.pf || []).map(f => fig(b, f, true)).join('')}</section>
       <div class="ds-top" id="dsProg"></div>
-      <div id="dsQs"></div><div id="dsEnd"></div>${prevNext(keys, i, 'Case')}`;
+      <div id="dsQs"></div><div id="dsEnd"></div>${prevNext(keys, i, 'Case')}<div class="row end mt-s"><button class="btn ghost sm" id="rstCh">↺ Reset case</button></div>`;
+    $('#rstCh').onclick = () => { const ids = caseIds(key), n = ids.filter(confOf).length; askReset(`Reset case ${ch.n}?`, n, `The ${n} confidence rating${n === 1 ? '' : 's'} in this case will be cleared.`, () => resetConf(ids)); };
     drawCase();
     $('#dsQs').onclick = e => caseClick(e, false);
     $('#dsEnd').onclick = e => { const a = e.target.closest('[data-again]'); if (!a) return; sess = caseStart(b, key, a.dataset.again); drawCase(); $('#dsProg').scrollIntoView({ block: 'start' }); };
@@ -224,7 +242,7 @@
   routes.revise = (arg) => {
     const b = Books.get(arg); if (!b || b.design !== 'case') return App.go('#/');
     if (b.id !== App.bookId()) Books.setCurrent(b.id);
-    const order = weakIn(allIds(b)).sort((x, y) => confOf(x) - confOf(y) || ((S().cards[x].last || 0) - (S().cards[y].last || 0)));
+    const order = weakIn(allIds(b)).sort((x, y) => confOf(x) - confOf(y) || (S().conf[x].ts - S().conf[y].ts));
     rv = { b, order, i: 0, open: false };
     drawRevise();
   };
@@ -274,6 +292,7 @@
 
   window.Designs = {
     tileStats(b) {
+      if (b.design === 'case') { const ids = allIds(b), r = ids.filter(confOf).length, d = ids.length ? r / ids.length : 0; return Object.assign(Store.statsOf([]), { total: ids.length, seen: r, done: d, mastery: d }); }
       if (b.design !== 'guided') return null;
       const t = guidedTotals(b);
       return Object.assign(Store.statsOf([]), { total: t.total, seen: t.seen, done: t.done, mastery: t.done });

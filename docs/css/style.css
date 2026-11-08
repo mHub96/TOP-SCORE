@@ -1047,3 +1047,4 @@ iframe.ds-video { border: 0; }
 .ds-tally { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
 .ds-tally div { display: flex; justify-content: space-between; align-items: center; }
 .ds-go { display: block; color: var(--ink); margin-top: 12px; }
+.ds-hh { margin: 14px 4px 8px; font-size: 1rem; }
