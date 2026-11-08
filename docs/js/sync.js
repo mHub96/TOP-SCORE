@@ -34,11 +34,12 @@
   /* leaderboard summary of this account */
   function stats() {
     const S = Store.S, wk = weekKey();
-    let wc = 0, wi = 0, wx = 0;
-    for (const d in S.daily) {
-      const x = S.daily[d];
-      if (weekKey(new Date(d + 'T12:00').getTime()) === wk) wx += x.xp || 0;
-    }
+    let wc = 0, wi = 0;
+    const base = {};   // known + mastered of each book at the end of last week (from the daily snapshots)
+    Object.keys(S.daily).sort().forEach(d => {
+      if (weekKey(new Date(d + 'T12:00').getTime()) === wk) return;
+      const x = S.daily[d]; if (x.m) base.ts = x.m; Object.assign(base, x.mb || {});
+    });
     // a question belongs to this week only if this week is when it was first answered / first got right
     const seen = {};
     S.log.forEach(l => { const s = seen[l[1]] || (seen[l[1]] = { t: l[0], r: 0, n: 0, g: 0 }); s.n++; if (l[2]) { s.g++; s.r = s.r || l[0]; } });
@@ -47,15 +48,14 @@
       if (s.r && weekKey(s.r * 1000) === wk && s.g >= (k.c || 0)) wc++;
       if (!(k.c > 0) && weekKey(s.t * 1000) === wk && s.n >= (k.w || 0)) wi++;
     }
-    const t = Store.globalTiers(), all = Store.tally();
-    return { v: 2, xp: S.xp, answered: all.correct + all.incorrect, correct: all.correct, mastered: t[3] + t[4], streak: Store.streak(), best_streak: Store.bestStreak(), week: wk, week_answered: wc + wi, week_correct: wc, week_xp: wx };
+    const all = Store.tally(), had = Object.values(base).reduce((n, t) => n + (t[3] || 0) + (t[4] || 0), 0), km = all.known + all.mastered;
+    return { v: 3, xp: S.xp, answered: all.correct + all.incorrect, correct: all.correct, mastered: km, mastered_only: all.mastered, week_mastered: Math.max(0, km - had), streak: Store.streak(), best_streak: Store.bestStreak(), week: wk, week_answered: wc + wi, week_correct: wc, week_xp: wc * Store.XP_PER_Q };
   }
   function absorb(remote) {
     if (!remote || !remote.state) return;
     absorbing = true;
-    const localGain = Math.max(0, Store.S.xp - (st.xpBase || 0));
     const remoteSettings = remote.state.settings;
-    Store.mergeState(remote.state, { xp: (remote.state.xp || 0) + localGain });
+    Store.mergeState(remote.state);
     if (remoteSettings && !st.seededSettings) { Object.assign(Store.S.settings, remoteSettings); st.seededSettings = 1; if (window.App && App.applyTheme) App.applyTheme(); }
     try {
       const cur = JSON.parse(localStorage.getItem(CHR()) || '{}') || {};
@@ -80,7 +80,7 @@
           if (p.conflict) { if (p.data) absorb(await decode(p.data)); st.rev = p.rev; continue; }
           st.rev = p.rev; break;
         }
-        st.xpBase = Store.S.xp; st.at = Date.now(); st.dirty = false; st.state = 'ok'; lastErr = '';
+        st.at = Date.now(); st.dirty = false; st.state = 'ok'; lastErr = '';
         keep();
         if (why === 'start' && window.App && /^#\/?$|^#\/book|^#\/stats|^#\/ch|^$/.test(location.hash)) App.render();
         return true;

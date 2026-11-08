@@ -1,7 +1,7 @@
-"""Recount the leaderboard numbers (v3.5 rules) of every account from its saved progress.
+"""Recount the leaderboard numbers (v3.6 rules) of every account from its saved progress.
 Each question counts once: correct if it was ever answered right, otherwise incorrect.
-Only the summary columns answered / correct / week / week_answered / week_correct of the `stats` table change.
-The `progress` table (each user's real progress) is only read, never written. XP is left as it is.
+XP is (questions ever answered right) x 35. Only the summary columns of the `stats` table change.
+The `progress` table (each user's real progress) is only read, never written.
 
   python recount_stats.py [worker-name]           preview, changes nothing
   python recount_stats.py [worker-name] --apply   saves a backup of `stats` in ../pack-build/, then updates it
@@ -55,12 +55,27 @@ def recount(state, now):
             wc += 1
         if not (k.get('c') or 0) > 0 and week_key(s['t']) == wk and s['n'] >= (k.get('w') or 0):
             wi += 1
-    return {'answered': correct + incorrect, 'correct': correct, 'week': wk, 'week_answered': wc + wi, 'week_correct': wc}
+    skips = state.get('skips') or {}
+    def tier(c):
+        return 0 if not c.get('reps') else 1 if not c.get('ok') else 2 if (c.get('s') or 0) < 4 else 3 if (c.get('s') or 0) < 21 else 4
+    tiers = [tier(c) for i, c in cards.items() if not (skips.get(i) or 0) > 0]
+    known, mastered = tiers.count(3), tiers.count(4)
+    base = {}
+    for d in sorted(state.get('daily', {})):
+        if week_key(datetime.datetime.fromisoformat(d + 'T12:00:00+00:00').timestamp()) == wk:
+            continue
+        x = state['daily'][d]
+        if x.get('m'):
+            base['ts'] = x['m']
+        base.update(x.get('mb') or {})
+    had = sum((t[3] or 0) + (t[4] or 0) for t in base.values())
+    return {'answered': correct + incorrect, 'correct': correct, 'xp': correct * 35, 'week_xp': wc * 35, 'mastered': known + mastered,
+            'mastered_only': mastered, 'week_mastered': max(0, known + mastered - had), 'week': wk, 'week_answered': wc + wi, 'week_correct': wc}
 
 
 old = q('SELECT * FROM stats')
 if APPLY:
-    out = os.path.join(here, '..', 'pack-build', f'stats-backup-{NAME}-{datetime.date.today():%Y%m%d}.json')
+    out = os.path.join(here, '..', 'pack-build', f'stats-backup-{NAME}-before-v36.json')
     if not os.path.exists(out):      # a second run must not replace the original numbers
         json.dump(old, open(out, 'w', encoding='utf-8'))
     print('backup:', os.path.normpath(out))
@@ -74,8 +89,8 @@ for n, r in enumerate(q('SELECT user_id FROM progress')):
     o = by.get(uid, {})
     print(f"user#{n}: answered {o.get('answered')} -> {new['answered']} | correct {o.get('correct')} -> {new['correct']} | "
           f"incorrect {(o.get('answered') or 0) - (o.get('correct') or 0)} -> {new['answered'] - new['correct']} | "
-          f"week {new['week_correct']} correct, {new['week_answered'] - new['week_correct']} incorrect | XP kept {o.get('xp')}")
+          f"XP {o.get('xp')} -> {new['xp']} (week {new['week_xp']}) | known+mastered {new['mastered']} (+{new['week_mastered']} this week, {new['mastered_only']} mastered)")
     if APPLY and uid in by:
-        q('UPDATE stats SET answered = ?, correct = ?, week = ?, week_answered = ?, week_correct = ? WHERE user_id = ?',
-          [new['answered'], new['correct'], new['week'], new['week_answered'], new['week_correct'], uid])
+        cols = list(new)
+        q('UPDATE stats SET ' + ', '.join(c + ' = ?' for c in cols) + ' WHERE user_id = ?', [new[c] for c in cols] + [uid])
 print('applied' if APPLY else 'preview only (add --apply to update)')

@@ -650,6 +650,11 @@
         ${toggle('recallFirst', '🤔 Recall-first: hide options until you try to recall the answer (generation effect)', set.recallFirst)}
       </section>
       <section class="card">
+        <h2>🔄 App updates</h2>
+        <p class="muted small" id="updV">Checks whether a newer version of TOP SCORE is available. Your progress is kept.</p>
+        <button class="btn" id="updBtn">Check for update</button>
+      </section>
+      <section class="card">
         <h2>📲 Install as an app</h2>
         <p class="muted small">Install TOP SCORE to your home screen — it works fully offline, on phones and tablets (portrait or landscape).</p>
         <button class="btn" id="inst" ${App.installEvt ? '' : 'disabled'}>Install app</button>
@@ -678,6 +683,7 @@
     $$('#theme button').forEach(b => b.onclick = () => { set.theme = b.dataset.v; Store.save(); applyTheme(); $$('#theme button').forEach(x => x.classList.toggle('on', x === b)); });
     $$('[data-tg]').forEach(i => i.onchange = () => { set[i.dataset.tg] = i.checked; Store.save(); FX.play('tap'); });
     $('#inst').onclick = async () => { if (App.installEvt) { App.installEvt.prompt(); await App.installEvt.userChoice; App.installEvt = null; $('#inst').disabled = true; } };
+    $('#updBtn').onclick = () => checkUpdate($('#updBtn'), $('#updV'));
     $('#rst').onclick = async () => {
       if (await confirmBox('Reset everything?', 'This erases all progress on this device (book files stay). Export a backup first if you might want it back.', 'Erase')) { Store.reset(); Modes.resume.clear(); applyTheme(); toast('Progress reset'); go('#/'); }
     };
@@ -767,6 +773,25 @@
   }
 
   // ---------- level up / theme / install ----------
+  // asks the browser to compare the online service worker with the installed one; a new one installs itself, then the page reloads
+  async function checkUpdate(btn, out) {
+    const say = t => { out.textContent = t; };
+    if (!('serviceWorker' in navigator)) return say('⚠️ Updates are not supported in this browser.');
+    if (!navigator.onLine) return say('📴 You are offline. Connect to the internet and try again.');
+    btn.disabled = true; say('Checking…');
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (!reg) { await navigator.serviceWorker.register('sw.js'); say('✅ The app is now set up for updates.'); return; }
+      await reg.update();
+      const nw = reg.installing || reg.waiting;
+      if (!nw) { const v = (await caches.keys()).find(k => /^topscore-v[\d.]+$/.test(k)); say(`✅ You have the latest version${v ? ' (' + v.replace('topscore-v', 'v') + ')' : ''}.`); return; }
+      say('⬇️ New version found. Installing…');
+      await new Promise((ok, no) => { if (nw.state === 'activated') return ok(); const t = setTimeout(() => no(new Error('timeout')), 60000); nw.addEventListener('statechange', () => { if (nw.state === 'activated') { clearTimeout(t); ok(); } else if (nw.state === 'redundant') { clearTimeout(t); no(new Error('failed')); } }); });
+      Store.save(true); say('✅ Updated. Restarting…');
+      setTimeout(() => location.reload(), 500);
+    } catch (e) { say('⚠️ Could not finish the check. Please try again in a moment.'); }
+    finally { btn.disabled = false; }
+  }
   function levelUp(lvl) {
     const lv = Store.levelInfo();
     setTimeout(() => {

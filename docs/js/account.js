@@ -362,13 +362,16 @@
   };
 
   // ---------- arena: leaderboard + challenges ----------
-  let lbPeriod = 'all', lbMetric = 'correct';
+  let lbPeriod = 'all', lbMetric = 'xp';
+  const num = v => (v || 0).toLocaleString();
+  /* tab: [name, score, counters under the name, how the ranking works] (w = this week) */
   const METRICS = {
-    correct: ['Correct', r => r.good],
-    xp: ['XP', r => (lbPeriod === 'week' ? r.week_xp : r.xp) || 0],
-    mastered: ['Known + mastered', r => r.mastered || 0]
+    xp: ['XP', (r, w) => (w ? r.week_xp : r.xp) || 0, (r, w) => { if (w) return `⭐ ${num(r.good)} new question${r.good === 1 ? '' : 's'} right this week`; const l = Store.levelInfo(r.xp || 0); return `⭐ Level ${l.lvl} · ${esc(l.rank)}`; }, `Every question earns ${Store.XP_PER_Q} XP, once, the first time you get it right. No bonuses.`],
+    correct: ['Answers', r => r.good, r => `✅ ${num(r.good)} correct · ❌ ${num(r.bad)} incorrect`, 'Ranked by correct answers. Each question counts once: correct if you have ever got it right, incorrect if you have not yet.'],
+    mastered: ['Known + mastered', (r, w) => (w ? r.week_mastered : r.mastered) || 0, (r, w) => w ? `🧠 +${num(r.week_mastered)} new this week` : `🧠 ${num((r.mastered || 0) - (r.mastered_only || 0))} known · 🏆 ${num(r.mastered_only)} mastered`, 'Ranked by questions at the Known or Mastered level. This week counts the net gain since last week.'],
+    streak: ['Streak', r => r.streak || 0, r => `🔥 ${num(r.streak)} day${r.streak === 1 ? '' : 's'} now · best ${num(r.best_streak)}`, 'Ranked by current daily streak.']
   };
-  const lbTabs = () => Object.keys(METRICS).filter(k => lbPeriod === 'all' || k !== 'mastered');   // mastery has no weekly figure
+  const lbTabs = () => Object.keys(METRICS).filter(k => lbPeriod === 'all' || k !== 'streak');   // a streak has no weekly figure
   App.routes.arena = async (arg) => {
     const v = $('#view'), tab = ['challenges', 'exam'].includes(arg) ? arg : 'leaders';
     v.innerHTML = `<div class="page-head"><h1>⚔️ Arena</h1><div class="seg" id="arTab"><button data-t="leaders" class="${tab === 'leaders' ? 'on' : ''}">🏆 Leaderboard</button><button data-t="challenges" class="${tab === 'challenges' ? 'on' : ''}">⚔️ Challenges</button><button data-t="exam" class="${tab === 'exam' ? 'on' : ''}">🖥️ Exam room</button></div></div><div id="arBody" class="muted">Loading…</div>`;
@@ -381,18 +384,18 @@
     try { if (window.Sync) await Sync.sync('lb'); } catch (e) { }
     let d; try { d = await api('/leaderboard'); } catch (e) { $('#arBody').textContent = '⚠️ ' + e.message; return; }
     const draw = () => {
-      const week = lbPeriod === 'week';
+      const week = lbPeriod === 'week', [, score, sub, how] = METRICS[lbMetric];
       const rows = d.rows.map(r => {
-        const correct = (week ? r.week_correct : r.correct) || 0;
-        return Object.assign({}, r, { good: correct, bad: Math.max(0, ((week ? r.week_answered : r.answered) || 0) - correct) });
-      }).map(r => Object.assign(r, { v: METRICS[lbMetric][1](r) })).sort((a, b) => b.v - a.v);
+        const good = (week ? r.week_correct : r.correct) || 0, x = Object.assign({}, r, { good, bad: Math.max(0, ((week ? r.week_answered : r.answered) || 0) - good) });
+        x.v = score(x, week); return x;
+      }).sort((a, b) => b.v - a.v);
       const medal = i => ['🥇', '🥈', '🥉'][i] || (i + 1);
       $('#arBody').innerHTML = `
         <div class="row gap wrap lb-ctl"><div class="seg" id="lbP"><button data-p="week" class="${week ? 'on' : ''}">This week</button><button data-p="all" class="${week ? '' : 'on'}">All time</button></div>
         <div class="book-switch" id="lbM">${lbTabs().map(k => `<button class="chip ${k === lbMetric ? 'on' : ''}" data-m="${k}">${METRICS[k][0]}</button>`).join('')}</div></div>
-        <section class="card lb">${rows.map((r, i) => `<div class="lb-row ${r.id === d.me ? 'me' : ''}" style="--d:${i * 50}ms"><span class="lb-rank">${medal(i)}</span><span class="acct-av sm">${esc((r.display || '?')[0].toUpperCase())}</span><span class="grow"><b>${esc(r.display)}</b>${r.id === d.me ? ' <small class="muted">(you)</small>' : ''}<br><small class="muted">✅ ${r.good.toLocaleString()} correct · ❌ ${r.bad.toLocaleString()} incorrect · ${r.streak || 0}🔥</small></span><b class="lb-v">${r.v.toLocaleString()}</b></div>`).join('') || '<p class="muted">No one on the board yet — answer some questions!</p>'}</section>
-        <p class="muted small center">Ranked by ${METRICS[lbMetric][0].toLowerCase()}${lbMetric === 'correct' ? ' answers' : ''}. Each question counts once: correct if you have ever got it right, incorrect if you have not yet. Turn “Show me on the leaderboards” off in Settings to hide yourself.</p>`;
-      $$('#lbP button').forEach(b => b.onclick = () => { lbPeriod = b.dataset.p; if (!lbTabs().includes(lbMetric)) lbMetric = 'correct'; draw(); });
+        <section class="card lb">${rows.map((r, i) => `<div class="lb-row ${r.id === d.me ? 'me' : ''}" style="--d:${i * 50}ms"><span class="lb-rank">${medal(i)}</span><span class="acct-av sm">${esc((r.display || '?')[0].toUpperCase())}</span><span class="grow"><b>${esc(r.display)}</b>${r.id === d.me ? ' <small class="muted">(you)</small>' : ''}<br><small class="muted">${sub(r, week)}</small></span><b class="lb-v">${num(r.v)}</b></div>`).join('') || '<p class="muted">No one on the board yet — answer some questions!</p>'}</section>
+        <p class="muted small center">${how} Turn “Show me on the leaderboards” off in Settings to hide yourself.</p>`;
+      $$('#lbP button').forEach(b => b.onclick = () => { lbPeriod = b.dataset.p; if (!lbTabs().includes(lbMetric)) lbMetric = 'xp'; draw(); });
       $$('#lbM button').forEach(b => b.onclick = () => { lbMetric = b.dataset.m; draw(); });
     };
     draw();

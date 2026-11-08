@@ -9,6 +9,7 @@
   window.TS_NS = NS;
   const KEY = 'topscore.v1' + NS, CHR = 'topscore.chresume' + NS;
   const DAY = 86400000;
+  const XP_PER_Q = 35;   // XP is always (questions ever answered right) x this: never stored as a running total, so nothing can inflate it
 
   // ---- question index (all books) ----
   const Q = {};          // id -> question {id, ch, bid, n, s, o, a, k, ...}
@@ -64,6 +65,7 @@
   try { S = JSON.parse(localStorage.getItem(KEY)) || fresh(); } catch (e) { S = fresh(); }
   S = Object.assign(fresh(), S);
   S.settings = Object.assign(fresh().settings, S.settings);
+  S.xp = xpTotal();
 
   let saveTimer = null;
   function save(now) {
@@ -134,12 +136,11 @@
   function day(d = today()) {
     return S.daily[d] || (S.daily[d] = { a: 0, c: 0, xp: 0, t: 0 });
   }
-  function addXP(n) {
+  let lvlTimer = null;
+  function creditXP(dd) {
     const before = levelInfo().lvl;
-    S.xp += n; day().xp += n;
-    const after = levelInfo().lvl;
-    if (after > before) window.App && App.levelUp(after);
-    save();
+    S.xp = xpTotal(); dd.xp += XP_PER_Q;
+    if (levelInfo().lvl > before && window.App) { clearTimeout(lvlTimer); lvlTimer = setTimeout(() => App.levelUp(levelInfo().lvl), 0); }   // one level-up window even if an exam jumps several
   }
 
   /* record an answer.  grade: FSRS grade (1..4). Returns updated card */
@@ -157,6 +158,7 @@
     if (S.log.length > 60000) S.log.splice(0, S.log.length - 60000);
     const dd = day();
     dd.a++; if (correct) dd.c++; dd.t += Math.min(opts.ms || 0, 300000);
+    if (correct && c.c === 1) creditXP(dd);
     dd.m = globalTiers(BK.ts ? BK.ts.keyed : []);           // Top Score snapshot (kept for v1 charts)
     dd.mb = dd.mb || {}; const b = Q[id].bid; dd.mb[b] = globalTiers(BK[b].keyed);
     S.sinceBackup++;
@@ -165,11 +167,16 @@
   }
   // true right after the answer that got this question right for the first time ever: the only answer that earns XP
   const firstCorrect = id => { const c = S.cards[id]; return !!c && c.ok === 1 && c.c === 1; };
+  const earned = id => firstCorrect(id) ? XP_PER_Q : 0;   // XP that the answer just recorded brought in
   // every question counts once: correct if it was ever answered right, otherwise incorrect
   function tally() {
-    let correct = 0, incorrect = 0;
-    for (const id in S.cards) { const c = S.cards[id]; if (c.c > 0) correct++; else if (c.w > 0) incorrect++; }
-    return { correct, incorrect };
+    let correct = 0, incorrect = 0, known = 0, mastered = 0;
+    for (const id in S.cards) { const c = S.cards[id]; if (c.c > 0) correct++; else if (c.w > 0) incorrect++; if (!isSkipped(id)) { const t = tier(id); if (t === 3) known++; else if (t === 4) mastered++; } }
+    return { correct, incorrect, known, mastered };
+  }
+  function xpTotal() {
+    let n = 0; for (const id in S.cards) if (S.cards[id].c > 0) n++;
+    return n * XP_PER_Q;
   }
   // flashcard rating without MCQ (counts as correct unless Again)
   function rate(id, g, mode) { return answer(id, g > 1, { grade: g, mode }); }
@@ -225,7 +232,7 @@
     (st.log || []).forEach(l => { if (!seen.has(l[0] + l[1])) S.log.push(l); });
     S.log.sort((x, y) => x[0] - y[0]);
     if (S.log.length > 60000) S.log.splice(0, S.log.length - 60000);
-    S.xp = opts.xp !== undefined ? opts.xp : Math.max(S.xp, st.xp || 0);
+    S.xp = xpTotal();
     Object.assign(S.ach, st.ach || {});
     S.flags = mergeStamp(S.flags, st.flags || {});
     S.skips = mergeStamp(S.skips || {}, st.skips || {});
@@ -251,6 +258,7 @@
     } else {
       S = Object.assign(fresh(), st);
       S.settings = Object.assign(fresh().settings, st.settings);
+      S.xp = xpTotal();
       Store.S = S;
     }
     if (j.chresume && typeof j.chresume === 'object') {
@@ -269,7 +277,7 @@
   window.Store = {
     get S() { return S; }, set S(v) { S = v; },
     Q, CH, ALL, BK, TIERS, RANKS, chKey, indexBook, unindexBook, syncBooks, keyed, isKeyed, answers, multi, allKeyed,
-    today, tier, statsOf, chapterStats, bookStats, globalTiers, dueIds, lastTouched, levelInfo, addXP, answer, rate, firstCorrect, tally,
+    today, tier, statsOf, chapterStats, bookStats, globalTiers, dueIds, lastTouched, levelInfo, answer, rate, firstCorrect, earned, tally, XP_PER_Q,
     streak, bestStreak, session, setBest, toggleFlag, isFlagged, isSkipped, setSkip, toggleSkip, clearSkips, mergeState, exportData, importData, reset, save, day, storageBytes
   };
 })();

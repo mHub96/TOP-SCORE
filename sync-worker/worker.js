@@ -410,9 +410,9 @@ export default {
       // ----- leaderboard -----
       if (p === '/api/leaderboard' && M === 'GET') {
         const wk = weekKey();
-        const rows = await env.DB.prepare(`SELECT u.id, u.display, s.xp, s.answered, s.correct, s.mastered, s.streak, s.best_streak, s.week, s.week_answered, s.week_correct, s.week_xp, s.updated
+        const rows = await env.DB.prepare(`SELECT u.id, u.display, s.xp, s.answered, s.correct, s.mastered, s.streak, s.best_streak, s.week, s.week_answered, s.week_correct, s.week_xp, s.updated, s.mastered_only, s.week_mastered
           FROM users u JOIN stats s ON s.user_id = u.id WHERE u.status = 'active' AND (u.lb = 1 OR u.id = ?)`).bind(me.id).all();
-        return J(req, { week: wk, me: me.id, rows: rows.results.map(r => Object.assign(r, r.week === wk ? {} : { week_answered: 0, week_correct: 0, week_xp: 0 })) });
+        return J(req, { week: wk, me: me.id, rows: rows.results.map(r => Object.assign(r, r.week === wk ? {} : { week_answered: 0, week_correct: 0, week_xp: 0, week_mastered: 0 })) });
       }
       if (p === '/api/users' && M === 'GET') {
         const rows = await env.DB.prepare("SELECT id, username, display, books, seen FROM users WHERE status = 'active' AND id != ? ORDER BY display").bind(me.id).all();
@@ -556,12 +556,12 @@ function weekKey(t = Date.now()) {
   return d.getUTCFullYear() + '-W' + String(Math.ceil(((d - y) / 86400000 + 1) / 7)).padStart(2, '0');
 }
 async function saveStats(env, uid, s) {
-  if (s.v !== 2) return;      // an old cached app still counting repeats must not overwrite the corrected numbers
+  if (s.v !== 3) return;      // an old cached app using earlier counting rules must not overwrite the corrected numbers
   const n = k => Math.max(0, Math.round(Number(s[k]) || 0));
-  await env.DB.prepare(`INSERT INTO stats (user_id, xp, answered, correct, mastered, streak, best_streak, week, week_answered, week_correct, week_xp, updated)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-    ON CONFLICT(user_id) DO UPDATE SET xp = ?2, answered = ?3, correct = ?4, mastered = ?5, streak = ?6, best_streak = ?7, week = ?8, week_answered = ?9, week_correct = ?10, week_xp = ?11, updated = ?12`)
-    .bind(uid, n('xp'), n('answered'), n('correct'), n('mastered'), n('streak'), n('best_streak'), String(s.week || weekKey()), n('week_answered'), n('week_correct'), n('week_xp'), Date.now()).run();
+  await env.DB.prepare(`INSERT INTO stats (user_id, xp, answered, correct, mastered, streak, best_streak, week, week_answered, week_correct, week_xp, updated, mastered_only, week_mastered)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+    ON CONFLICT(user_id) DO UPDATE SET xp = ?2, answered = ?3, correct = ?4, mastered = ?5, streak = ?6, best_streak = ?7, week = ?8, week_answered = ?9, week_correct = ?10, week_xp = ?11, updated = ?12, mastered_only = ?13, week_mastered = ?14`)
+    .bind(uid, n('xp'), n('answered'), n('correct'), n('mastered'), n('streak'), n('best_streak'), String(s.week || weekKey()), n('week_answered'), n('week_correct'), n('week_xp'), Date.now(), n('mastered_only'), n('week_mastered')).run();
 }
 function chOut(c) {
   const side = k => ({ id: c[k + '_id'], name: c[k + '_name'], ready: !!c[k + '_ready'], score: c[k + '_score'] || 0, correct: c[k + '_correct'] || 0, answered: c[k + '_answered'] || 0, done: !!c[k + '_done'], ms: c[k + '_ms'] || 0 });

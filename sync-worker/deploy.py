@@ -53,6 +53,10 @@ else:
 ucols = [c['name'] for c in call('POST', f'/d1/database/{dbid}/query', {'sql': "SELECT name FROM pragma_table_info('users')"})['result'][0]['results']]
 if 'exam_host' not in ucols:     # owner-granted right to host exam rooms
     call('POST', f'/d1/database/{dbid}/query', {'sql': 'ALTER TABLE users ADD COLUMN exam_host INTEGER DEFAULT 0'})
+scols = [c['name'] for c in call('POST', f'/d1/database/{dbid}/query', {'sql': "SELECT name FROM pragma_table_info('stats')"})['result'][0]['results']]
+for col in ('mastered_only', 'week_mastered'):      # leaderboard: known and mastered apart, weekly gain
+    if col not in scols:
+        call('POST', f'/d1/database/{dbid}/query', {'sql': f'ALTER TABLE stats ADD COLUMN {col} INTEGER DEFAULT 0'})
 print('schema ready')
 
 src = open(os.path.join(here, 'worker.js'), 'rb').read()
