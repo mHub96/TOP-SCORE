@@ -47,6 +47,7 @@
   const refLine = q => (q.r && !Array.isArray(q.r)) ? `<div class="src">📖 ${esc(q.r)}</div>` : '';
   const noteLine = q => q.x ? `<div class="note">ℹ️ ${esc(q.x)}</div>` : '';
   function optsPrev(q, mine) {
+    if (q.open) return `<div class="open-ans">${q.o[0]}</div>`;
     const ms = mine === undefined || mine === null ? [] : (Array.isArray(mine) ? mine : [mine]);
     return `<ol class="opts-prev">${q.o.map((o, i) => `<li class="${isRight(q, i) ? 'ok' : ''} ${ms.includes(i) && !isRight(q, i) ? 'no' : ''}"><b>${L(i)}.</b> ${optText(q, i)}${ms.includes(i) ? ' <small>← your answer</small>' : ''}</li>`).join('')}</ol>`;
   }
@@ -118,7 +119,7 @@
     document.body.classList.toggle('exam-mode', path === 'x' || (path === 'examroom' && !!arg));
     document.body.classList.toggle('exam-host', path === 'examroom' && !!arg);
     const fn = routes[path || 'home'] || routes.home;
-    const navKey = path === 'ch' || path === 'chapters' ? 'book' : ['duel', 'examroom', 'x'].includes(path) ? 'arena' : (path || 'home');
+    const navKey = path === 'ch' || path === 'chapters' || path === 'read' ? 'book' : ['duel', 'examroom', 'x'].includes(path) ? 'arena' : (path || 'home');
     $$('.nav a').forEach(a => a.classList.toggle('on', a.dataset.r === navKey));
     document.body.classList.toggle('playing', path === 'play');
     const v = view();
@@ -377,7 +378,7 @@
         <div class="row gap wrap mt">
           <button class="btn" data-bgo="smart">🧠 Smart review${st.due ? ` · ${st.due} due` : ''}</button>
           ${nextKey ? `<button class="btn ghost" data-chnext="${esc(nextKey)}">▶ Continue: ${chShort(nextKey)}</button>` : ''}
-          <button class="btn ghost" data-bgo="exam">⏱️ Exam</button>
+          ${b.type === 'study' ? '' : '<button class="btn ghost" data-bgo="exam">⏱️ Exam</button>'}
           <a class="btn ghost" href="#/stats">📊 Stats</a>
         </div>
       </section>
@@ -409,7 +410,7 @@
     return `<a class="ch-card card" href="#/ch/${encodeURIComponent(k)}" data-t="${esc(strip(c.t).toLowerCase())} ${c.n}">
       ${ring(cs.done, 50, 5, pct(cs.done))}
       <div class="grow"><div class="ch-t"><span class="num">${c.n}</span>${c.t}</div>
-      <div class="muted small">${cs.total} MCQs${cs.practice ? ' +' + cs.practice + ' practice' : ''} · ${cs.seen} seen${cs.acc !== null ? ' · ' + pct(cs.acc) + ' acc' : ''} · mastery ${pct(cs.mastery)}${cs.due ? ` · <span class="pill warn">${cs.due} due</span>` : ''}</div>
+      <div class="muted small">${cs.total} ${Books.get(c.bid).type === 'study' ? 'cards' : 'MCQs'}${cs.practice ? ' +' + cs.practice + ' practice' : ''} · ${cs.seen} seen${cs.acc !== null ? ' · ' + pct(cs.acc) + ' acc' : ''} · mastery ${pct(cs.mastery)}${cs.due ? ` · <span class="pill warn">${cs.due} due</span>` : ''}</div>
       ${pbar(cs, 'thin')}${chip || cs.skipped ? `<div class="mt-s">${chip}${cs.skipped ? ` <span class="pill skip">⏭ ${cs.skipped} skipped</span>` : ''}</div>` : ''}</div><span class="chev">›</span></a>`;
   }
 
@@ -444,8 +445,9 @@
         : (cs.seen > 0 && cs.seen < cs.total ? `<div class="ch-cont card"><div class="grow"><b>▶ Continue this chapter</b><div class="muted small">${cs.total - cs.seen} questions you haven't answered yet</div></div><button class="btn" data-chnext="${esc(key)}">Continue</button></div>` : '')}
         <div class="row between mt">${idx > 0 ? `<a class="chip" href="#/ch/${encodeURIComponent(keys[idx - 1])}">‹ Ch ${CH[keys[idx - 1]].n}</a>` : '<span></span>'}${idx < keys.length - 1 ? `<a class="chip" href="#/ch/${encodeURIComponent(keys[idx + 1])}">Ch ${CH[keys[idx + 1]].n} ›</a>` : ''}</div>
       </section>
+      ${studyBar(b, key)}
       <h2 class="sec-h">Study this chapter</h2>
-      <div class="mode-grid">${Modes.list.filter(m => m.chapter !== false).map(m => `
+      <div class="mode-grid">${Modes.forBook(b).filter(m => m.chapter !== false).map(m => `
         <button class="mode card" data-mode="${m.id}" style="--h:${m.hue}"><span class="m-ic">${m.ic}</span><b>${m.name}</b><small>${m.short}</small></button>`).join('')}</div>
       <h2 class="sec-h">Questions <span class="muted small">(tap to preview · ⏭ to skip / un-skip)</span>${cs.skipped ? ` <button class="chip" id="clrChSkips">Un-skip all ${cs.skipped} here</button>` : ''}</h2>
       <div class="q-list">${ch.ids.map(id => { const q = Q[id], t = Store.tier(id); return `
@@ -459,6 +461,32 @@
     Explain.scan(view());
   };
 
+  // ---------- study books: reading notes and streamed videos ----------
+  const chData = (b, key) => b.chapters.find(c => Store.chKey(b.id, c.n) === key) || {};
+  function studyBar(b, key) {
+    if (b.type !== 'study') return '';
+    const c = chData(b, key);
+    return `<div class="row gap wrap mt">${(c.notes || []).length ? `<a class="btn" href="#/read/${encodeURIComponent(key)}">📖 Read</a>` : ''}${c.video ? `<button class="btn ghost" data-video="${esc(c.video.watch || c.video.url)}" data-open="${esc(c.video.url)}">▶️ Watch video</button>` : ''}</div>`;
+  }
+  routes.read = (arg) => {
+    const ch = CH[arg]; if (!ch) return go('#/book/' + bookId());
+    const b = book(ch.bid), c = chData(b, arg), keys = chKeys(ch.bid), i = keys.indexOf(arg);
+    view().innerHTML = `<a class="back" href="#/ch/${encodeURIComponent(arg)}">‹ Chapter</a>
+      <div class="page-head"><h1><span class="num big">${ch.n}</span> ${ch.t}</h1>${studyBar(b, arg).replace(/<a class="btn"[^]*?<\/a>/, '')}</div>
+      <div class="notes">${(c.notes || []).map(n => `<section class="card note-sec"><h2>${esc(n.h)}</h2>${n.html}${n.pg ? `<div class="src">📖 ${esc(b.short)}, p. ${esc(n.pg)}</div>` : ''}</section>`).join('') || '<p class="muted center">No reading notes for this chapter.</p>'}</div>
+      <div class="row between mt">${i > 0 ? `<a class="chip" href="#/read/${encodeURIComponent(keys[i - 1])}">‹ Previous</a>` : '<span></span>'}<a class="btn" href="#/ch/${encodeURIComponent(arg)}">🧠 Test yourself</a>${i < keys.length - 1 ? `<a class="chip" href="#/read/${encodeURIComponent(keys[i + 1])}">Next ›</a>` : '<span></span>'}</div>`;
+    window.scrollTo(0, 0);
+  };
+  function videoPop(src, link) {
+    const w = document.createElement('div'); w.className = 'vpop';
+    w.innerHTML = `<div class="vpop-bar"><a href="${esc(link)}" target="_blank" rel="noopener">Open in a new tab</a><button class="btn sm" id="vpopX">✕ Close</button></div><iframe src="${esc(src)}" title="Video" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+    const fs = () => w.classList.toggle('fs', !!document.fullscreenElement);
+    const close = () => { document.removeEventListener('fullscreenchange', fs); w.remove(); };
+    document.addEventListener('fullscreenchange', fs);
+    document.body.appendChild(w); w.querySelector('#vpopX').onclick = close;
+  }
+  document.addEventListener('click', e => { const b = e.target.closest('[data-video]'); if (!b) return; e.preventDefault(); videoPop(b.dataset.video, b.dataset.open); });
+
   // ---------- study hub & games ----------
   const bookSwitch = () => {
     const bs = Books.list(); if (bs.length < 2) return '';
@@ -467,12 +495,12 @@
   function bindSwitch() { $$('[data-bk]').forEach(x => x.onclick = () => { Books.setCurrent(x.dataset.bk); render(); }); }
   routes.study = () => {
     view().innerHTML = `<div class="page-head"><h1>Study modes</h1>${bookSwitch()}<p class="muted">Built on retrieval practice, spaced repetition, interleaving and confidence calibration — the techniques with the strongest evidence for long-term retention.</p></div>
-      <div class="mode-list">${Modes.list.filter(m => m.kind === 'study').map(modeRow).join('')}</div>`;
+      <div class="mode-list">${Modes.forBook(book()).filter(m => m.kind === 'study').map(modeRow).join('')}</div>`;
     bindModeRows(); bindSwitch();
   };
   routes.games = () => {
     view().innerHTML = `<div class="page-head"><h1>Games</h1>${bookSwitch()}<p class="muted">Same verified questions, more adrenaline. Every answer still feeds your spaced-repetition schedule.</p></div>
-      <div class="mode-list">${Modes.list.filter(m => m.kind === 'game').map(modeRow).join('')}</div>`;
+      <div class="mode-list">${Modes.forBook(book()).filter(m => m.kind === 'game').map(modeRow).join('') || '<p class="muted center">Games use multiple-choice questions, so this book has none. Choose another book above.</p>'}</div>`;
     bindModeRows(); bindSwitch();
   };
   function modeRow(m) {
@@ -497,9 +525,16 @@
         if (hay.includes(q)) { res.push(x); if (res.length >= 80) break; }
       }
       const hl = s => s.replace(new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')(?![^<]*>)', 'gi'), '<mark>$1</mark>');
-      $('#sres').innerHTML = `<p class="muted small">${res.length >= 80 ? '80+' : res.length} matches</p>` + res.map(x => `
+      const noteHits = [];
+      Books.list().filter(b => b.type === 'study' && (scope === 'all' || b.id === scope)).forEach(b => b.chapters.forEach(c => (c.notes || []).forEach(n => {
+        const t = strip(n.html), at = (n.h + ' ' + t).toLowerCase().indexOf(q); if (at < 0 || noteHits.length >= 40) return;
+        const from = Math.max(0, at - n.h.length - 60);
+        noteHits.push({ key: Store.chKey(b.id, c.n), h: n.h, pg: n.pg, snip: (from ? '…' : '') + esc(t.slice(from, from + 190)) + '…' });
+      })));
+      $('#sres').innerHTML = `<p class="muted small">${res.length >= 80 ? '80+' : res.length} questions · ${noteHits.length} reading sections</p>` + noteHits.map(n => `
+        <div class="card s-item"><div class="muted small"><a href="#/read/${encodeURIComponent(n.key)}">📖 ${chTitle(n.key)}</a> · ${esc(n.h)}${n.pg ? ' · p. ' + esc(n.pg) : ''}</div><div class="s-stem">${hl(n.snip)}</div></div>`).join('') + res.map(x => `
         <div class="card s-item"><div class="muted small"><a href="#/ch/${encodeURIComponent(x.ch)}">${chTitle(x.ch)}</a> · Q${x.n}</div><div class="s-stem">${hl(x.s || strip(x.g || ''))}${x.img ? ' 🖼️' : ''}</div>
-        <div class="s-ans">${x.nk ? '— no key in the book' : '✅ ' + correctSet(x).map(i => L(i) + '. ' + hl(optText(x, i))).join(' · ')}</div></div>`).join('');
+        <div class="s-ans">${x.open ? hl(x.o[0]) : x.nk ? '— no key in the book' : '✅ ' + correctSet(x).map(i => L(i) + '. ' + hl(optText(x, i))).join(' · ')}</div></div>`).join('');
     };
     $$('#sScope [data-s]').forEach(b => b.onclick = () => { scope = b.dataset.s; $$('#sScope [data-s]').forEach(x => x.classList.toggle('on', x === b)); run(); });
     $('#sq').oninput = run; run(); $('#sq').focus();

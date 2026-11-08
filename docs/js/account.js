@@ -429,7 +429,7 @@
   }
   const DUEL_MODES = [['challenge', '🎯 MCQ Challenge'], ['shuffle', '🔀 Shuffle Mix'], ['confidence', '🎚️ Confidence'], ['blitz', '⚡ Speed Blitz (60 s)'], ['survival', '❤️ Survival (3 lives)'], ['boss', '🐉 Boss Battle']];
   function newDuel(users) {
-    const myBooks = Books.list().map(b => b.id);
+    const myBooks = Books.list().filter(b => b.type !== 'study').map(b => b.id);
     const m = App.modal(`<div class="setup"><div class="setup-h" style="--h:15"><span class="m-ic">⚔️</span><div><h3>New challenge</h3><p class="muted small">Same questions, same order, live scores.</p></div></div>
       <label class="field"><span>Opponent</span><select id="dTo" class="chip">${users.map(u => `<option value="${u.id}">${esc(u.display)}${u.online ? ' · 🟢 online' : ''}</option>`).join('')}</select></label>
       <label class="field"><span>Book</span><select id="dBook" class="chip"></select></label>

@@ -17,6 +17,8 @@
     { id: 'exam', kind: 'study', ic: '⏱️', hue: 0, name: 'Exam Simulator', short: 'Timed, no feedback', desc: 'Board-style timed block. Flag questions, jump around, submit — then a full review with your answers vs the keys.' },
     { id: 'mistakes', kind: 'study', ic: '❌', hue: 350, name: 'Mistakes Vault', short: 'Fix weak spots', desc: 'Only questions you got wrong last time (or still struggle with). Clear the vault!', chapter: true },
     { id: 'flagged', kind: 'study', ic: '⭐', hue: 50, name: 'Starred', short: 'Your bookmarks', desc: 'Practise the questions you starred with ☆ during any session.' },
+    { id: 'read', kind: 'study', only: 1, ic: '📖', hue: 160, name: 'Read', short: 'Reading notes', desc: 'Read the chapter notes first, then test yourself with recall cards.' },
+    { id: 'order', kind: 'study', only: 1, ic: '🪜', hue: 95, name: 'Step Order', short: 'Sequence the steps', desc: 'Tap the steps of a procedure in the correct order. Sequencing from memory trains the operative workflow.' },
     { id: 'blitz', kind: 'game', ic: '⚡', hue: 50, name: 'Speed Blitz', short: '60-second sprint', desc: '60 seconds on the clock. Correct answers build a combo multiplier; mistakes cost 3 seconds.', bestUnit: ' pts' },
     { id: 'survival', kind: 'game', ic: '❤️', hue: 350, name: 'Survival', short: '3 lives', desc: 'Endless questions, three lives. How far can you go?', bestUnit: ' correct' },
     { id: 'boss', kind: 'game', ic: '🐉', hue: 280, name: 'Boss Battle', short: 'Defeat the chapter', desc: 'Each chapter is a boss. Correct answers strike (streaks crit!), wrong answers or timeouts hit you back.' },
@@ -25,6 +27,9 @@
     { id: 'knockout', kind: 'game', ic: '🥊', hue: 15, name: 'Knockout', short: 'Eliminate wrong', desc: 'Tap the WRONG options to knock them out one by one. Hit a correct one and you\'re knocked down. Trains elimination skills.', bestUnit: ' pts' }
   ];
   const M = id => list.find(m => m.id === id);
+  // study books hold recall cards (no options), so only the modes that work without options apply
+  const STUDY_MODES = ['smart', 'flash', 'read', 'order', 'shuffle', 'mistakes', 'flagged'];
+  const forBook = b => list.filter(m => b && b.type === 'study' ? STUDY_MODES.includes(m.id) : !m.only);
   // modes that may contain practice-only questions (printed without a key)
   const PRACTICE_OK = new Set(['learn', 'challenge', 'shuffle', 'flagged']);
   let SID = 0;
@@ -94,7 +99,7 @@
     const sh = modal(`
       <div class="setup">
         <div class="setup-h" style="--h:${m.hue}"><span class="m-ic">${m.ic}</span><div><h3>${m.name}</h3><p class="muted small">${m.desc}</p></div></div>
-        <div class="book-switch">${Books.list().map(x => `<button class="chip ${x.id === bid ? 'on' : ''}" data-bk="${x.id}">${x.icon || '📘'} ${esc(x.short)}</button>`).join('')}</div>
+        <div class="book-switch">${Books.list().filter(x => forBook(x).some(k => k.id === modeId)).map(x => `<button class="chip ${x.id === bid ? 'on' : ''}" data-bk="${x.id}">${x.icon || '📘'} ${esc(x.short)}</button>`).join('')}</div>
         <div class="field"><span>Chapters of <b>${esc(b.short)}</b> ${needsOne ? '<small class="muted">(choose one)</small>' : ''}</span>
           <div class="row gap wrap">${needsOne ? '' : '<button class="chip" id="selAll">All chapters</button><button class="chip" id="selNone">Clear</button>'}${multiParts ? `<select id="partSel" class="chip"><option value="">Add a part…</option>${b.parts.map((p, i) => `<option value="${i}">${esc(p)}</option>`).join('')}</select>` : ''}</div>
           <input class="search sm" id="chSearch" placeholder="Find chapter…">
@@ -156,6 +161,15 @@
     const n = o.count;
     const ctx = { modeId, scope, chapters: all ? null : chs, bid };
     const one = chs.length === 1;
+    if (Books.get(bid) && Books.get(bid).type === 'study') switch (modeId) {
+      case 'read': return App.go('#/read/' + encodeURIComponent(o.fromChapter || chs[0]));
+      case 'order': return orderDrill(Object.assign(ctx, { chs }));
+      case 'smart': return flash(Object.assign(ctx, { ids: smartQueue(ids, n || 30) }));
+      case 'shuffle': return flash(Object.assign(ctx, { ids: shuffle(ids).slice(0, n || 25) }));
+      case 'mistakes': case 'flagged': return flash(Object.assign(ctx, { ids: shuffle(ids) }));
+      case 'flash': break;
+      default: toast('This mode needs multiple-choice questions.'); return;
+    }
     switch (modeId) {
       case 'learn': return learn(one ? chs[0] : (o.fromChapter || chs[0]));
       case 'smart': return quiz(Object.assign(ctx, { title: 'Smart Review', ids: smartQueue(ids, n || 30), feedback: 'instant', fsrs: true }));
@@ -717,8 +731,8 @@
         <div class="play-top"><button class="icon-btn" id="quit">✕</button><div class="grow"><div class="row between small"><b>Flashcards</b><span class="muted">${done} done · ${queue.length} left</span></div><div class="prog"><i style="width:${done / (done + queue.length) * 100}%"></i></div></div></div>
         <div class="fc-stage"><div class="fc" id="fc" tabindex="0">
           <div class="fc-face fc-front"><div class="q-meta"><span class="tag">${esc(qLabel(q))}</span><span class="tag t${Store.tier(id)}">${Store.TIERS[Store.tier(id)]}</span><button class="skipbtn" id="fcSkip" title="Skip this question from now on">⏭</button></div>${stemHTML(q, { noCredit: true })}<div class="fc-hint">Recall the answer, then tap to flip ↻</div></div>
-          <div class="fc-face fc-back"><div class="muted small">Answer${ans.length > 1 ? 's' : ''}</div><div class="fc-ans">${ans.map(i => (q.lab ? '' : `<b>${L(i)}.</b> `) + optText(q, i)).join('<br>')}</div><div class="fc-key">Book key: ${keyText(q)}</div>${refLine(q)}${noteLine(q)}
-            <details class="fc-all"><summary>All options</summary>${optsPrev(q)}</details></div>
+          <div class="fc-face fc-back"><div class="muted small">Answer${ans.length > 1 ? 's' : ''}</div>${q.open ? `<div class="fc-ans open-ans">${q.o[0]}</div>` : `<div class="fc-ans">${ans.map(i => (q.lab ? '' : `<b>${L(i)}.</b> `) + optText(q, i)).join('<br>')}</div><div class="fc-key">Book key: ${keyText(q)}</div>`}${refLine(q)}${noteLine(q)}
+            ${q.open ? '' : `<details class="fc-all"><summary>All options</summary>${optsPrev(q)}</details>`}</div>
         </div></div>
         <div class="rate hidden" id="rate">${['Again', 'Hard', 'Good', 'Easy'].map((r, i) => `<button class="r${i + 1}" data-g="${i + 1}"><b>${r}</b><small>${fmtIvl(prev[i])}</small></button>`).join('')}</div>
         <p class="muted small center" id="swipeHint">Swipe ← Again · → Good · ↑ Easy</p>
@@ -964,6 +978,33 @@
       blitz: { feedback: 'flash', timeLimit: 60, blitz: true }, survival: { feedback: 'instant', lives: 3, survival: true }, boss: { feedback: 'instant', boss: true, perQ: 40 } }[c.mode] || { feedback: 'instant', challenge: true };
     quiz(Object.assign(ctx, base, extra));
   }
-  window.Modes = { list, setup, start, resume: Resume, duel };
+  /* tap the steps of each procedure in the right order */
+  function orderDrill(cfg) {
+    const sets = [].concat(...cfg.chs.map(k => { const b = Books.get(CH[k].bid), c = b.chapters.find(x => Store.chKey(b.id, x.n) === k) || {}; return (c.order || []).map(o => Object.assign({ key: k }, o)); }));
+    if (!sets.length) { toast('No step sequences in this selection.'); return; }
+    enterPlay(); Resume.track(() => null);
+    const deck = shuffle(sets); let s = 0, misses = 0, perfect = 0;
+    function draw() {
+      if (s >= deck.length) return end();
+      const set = deck[s], pool = shuffle(set.steps.map((t, i) => ({ t, i })));
+      let next = 0, slip = 0;
+      view().innerHTML = `<div class="play"><div class="play-top"><button class="icon-btn" id="quit">✕</button><div class="grow"><div class="row between small"><b>Step Order</b><span class="muted">${s + 1} of ${deck.length}</span></div><div class="prog"><i style="width:${s / deck.length * 100}%"></i></div></div></div>
+        <div class="card qcard"><div class="q-meta"><span class="tag">${chPlain(set.key).slice(0, 44)}</span></div><div class="stem">${esc(set.t)}</div>
+        <ol class="ord-done" id="ordDone"></ol><div class="opts" id="ordPool">${pool.map(x => `<button class="opt" data-i="${x.i}"><span class="ot">${x.t}</span></button>`).join('')}</div>
+        <div id="fb"></div>${set.pg ? `<div class="src">📖 p. ${esc(set.pg)}</div>` : ''}</div></div>`;
+      $('#quit').onclick = () => App.go(backHash(cfg));
+      $$('#ordPool .opt').forEach(b => b.onclick = () => {
+        if (+b.dataset.i !== next) { slip++; misses++; b.classList.remove('shake'); void b.offsetWidth; b.classList.add('shake'); FX.play('wrong'); FX.buzz([40, 30, 40]); return; }
+        next++; FX.play('tap'); $('#ordDone').insertAdjacentHTML('beforeend', `<li class="pop-in">${set.steps[+b.dataset.i]}</li>`); b.remove();
+        if (next === set.steps.length) { if (!slip) perfect++; FX.play('correct'); $('#fb').innerHTML = `<div class="fb ${slip ? 'bad' : 'good'} pop-in"><div class="fb-h">${slip ? slip + ' misplaced tap' + (slip > 1 ? 's' : '') : 'Perfect sequence!'}</div><button class="btn block" id="nextBtn">Next ›</button></div>`; $('#nextBtn').onclick = () => { s++; draw(); }; }
+      });
+    }
+    function end() {
+      view().innerHTML = `<div class="results"><div class="card glow res-hero"><div class="intro-logo">🪜</div><h2>${perfect} of ${deck.length} perfect</h2><p class="muted">${misses} misplaced tap${misses === 1 ? '' : 's'}</p><div class="row gap wrap center"><button class="btn" id="again">Again</button><button class="btn ghost" id="back">Done</button></div></div></div>`;
+      $('#again').onclick = () => orderDrill(cfg); $('#back').onclick = () => App.go(backHash(cfg));
+    }
+    draw();
+  }
+  window.Modes = { list, forBook, setup, start, resume: Resume, duel };
   App.routes.play = () => { if (!view().querySelector('.play,.results')) location.replace('#/'); };
 })();

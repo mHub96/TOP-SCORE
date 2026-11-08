@@ -47,7 +47,7 @@
     if (!Account.me()) return Account.showAuth();
     if (!canHost()) { $('#view').innerHTML = noHostHTML; return; }
     const last = Object.assign({ cnt: 20, pace: 'timer', secs: 60, auto: true, guests: false }, JSON.parse(localStorage.getItem('ts.examcfg') || '{}'), prefill || {});
-    const books = Books.list();
+    const books = Books.list().filter(b => b.type !== 'study');   // recall cards have no options
     const v = $('#view');
     v.innerHTML = `<a class="back" href="#/arena/exam">‹ Arena</a>
       <div class="page-head"><h1>🖥️ Exam room</h1><p class="muted">Open this on the big screen. Examinees scan the QR code with their phones and answer there.</p></div>
