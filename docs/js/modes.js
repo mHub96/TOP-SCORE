@@ -29,7 +29,7 @@
   const M = id => list.find(m => m.id === id);
   // study books hold recall cards (no options), so only the modes that work without options apply
   const STUDY_MODES = ['smart', 'flash', 'read', 'order', 'shuffle', 'mistakes', 'flagged'];
-  const forBook = b => list.filter(m => b && b.type === 'study' ? STUDY_MODES.includes(m.id) : !m.only);
+  const forBook = b => b && b.design ? [] : list.filter(m => b && b.type === 'study' ? STUDY_MODES.includes(m.id) : !m.only);   // books with their own design (designs.js) use none of the modes
   // modes that may contain practice-only questions (printed without a key)
   const PRACTICE_OK = new Set(['learn', 'challenge', 'shuffle', 'flagged']);
   let SID = 0;

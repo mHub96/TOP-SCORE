@@ -119,7 +119,7 @@
     document.body.classList.toggle('exam-mode', path === 'x' || (path === 'examroom' && !!arg));
     document.body.classList.toggle('exam-host', path === 'examroom' && !!arg);
     const fn = routes[path || 'home'] || routes.home;
-    const navKey = path === 'ch' || path === 'chapters' || path === 'read' ? 'book' : ['duel', 'examroom', 'x'].includes(path) ? 'arena' : (path || 'home');
+    const navKey = path === 'ch' || path === 'chapters' || path === 'read' || path === 'guide' || path === 'revise' ? 'book' : ['duel', 'examroom', 'x'].includes(path) ? 'arena' : (path || 'home');
     $$('.nav a').forEach(a => a.classList.toggle('on', a.dataset.r === navKey));
     document.body.classList.toggle('playing', path === 'play');
     const v = view();
@@ -190,7 +190,7 @@
 
   // ---------- home: bookshelf ----------
   function bookTile(b, i) {
-    const st = Store.bookStats(b.id), cur = b.id === bookId();
+    const st = (window.Designs && Designs.tileStats(b)) || Store.bookStats(b.id), cur = b.id === bookId();
     return `<a class="book-tile ${cur ? 'cur' : ''}" href="#/book/${b.id}" style="--bc:${b.color || '#6d4cff'};--d:${i * 70}ms">
       ${(() => { const cv = Books.cover(b.id); return cv
         ? `<div class="cover has-img"><img src="${cv}" alt="${esc(b.title)} cover" loading="lazy"><span class="spine"></span>${st.due ? `<span class="b-due">${st.due} due</span>` : ''}</div>`
@@ -293,7 +293,7 @@
         Store.syncBooks(); Store.indexBook(r.book);
         Books.setCurrent(r.book.id);
         FX.play('win'); FX.confetti();
-        toast(`📚 ${esc(r.book.short)} ${r.replaced ? 'updated' : 'added to your shelf'} — ${Store.BK[r.book.id].ids.length.toLocaleString()} questions`);
+        toast(`📚 ${esc(r.book.short)} ${r.replaced ? 'updated' : 'added to your shelf'}${r.book.design === 'guided' ? '' : ` — ${Store.BK[r.book.id].ids.length.toLocaleString()} questions`}`);
         go('#/book/' + r.book.id);
       } catch (e) { busy.close(); toast('⚠️ ' + esc(e.message || 'Could not load the file.'), 4000); }
     };
@@ -385,8 +385,10 @@
       ${chapterResumeList(b.id, 3)}
       ${st.skipped ? `<section class="card skip-card"><div class="grow"><b>⏭ ${st.skipped} skipped question${st.skipped > 1 ? 's' : ''}</b><div class="muted small">Left out of every mode and of this book's progress. Un-skip one from its chapter, or all at once here.</div></div><button class="btn ghost sm" id="clrSkips">Clear all skips</button></section>` : ''}
       ${weak.length ? `<section class="card"><h2>🎯 Focus next</h2>${weak.map(w => `<a class="list-item" href="#/ch/${encodeURIComponent(w.key)}"><span class="num">${CH[w.key].n}</span><span class="grow">${esc(strip(CH[w.key].t))}<br><small class="muted">${w.acc === null ? 'not started' : pct(w.acc) + ' accuracy'} · ${pct(w.mastery)} mastery</small></span><span class="chev">›</span></a>`).join('')}</section>` : ''}
-      <div class="page-head"><div class="row between"><h2>Chapters</h2><span class="muted small">${keys.length} chapters</span></div>
-      <input class="search" id="chFilter" placeholder="Filter chapters…" autocomplete="off"></div>
+      ${b.guide ? `<details class="card guide" open><summary><b>🧭 How to study this book</b></summary>${b.guide}</details>` : ''}
+      <div class="page-head"><div class="row between"><h2>${b.cases ? 'Cases' : 'Chapters'}</h2><span class="muted small">${keys.length} ${b.cases ? 'cases' : 'chapters'}</span></div>
+      <input class="search" id="chFilter" placeholder="${esc(b.type === 'study' ? (b.searchHint || 'Search the whole book…') : 'Filter chapters…')}" autocomplete="off"></div>
+      ${b.type === 'study' ? '<div id="secHits"></div>' : ''}
       <div id="chList">${b.parts.map((p, pi) => {
         const ks = keys.filter(k => CH[k].p === pi); if (!ks.length) return '';
         return `<section class="part" data-part="${pi}">${multiParts ? `<h3 class="part-h"><span>${esc(p.split(':')[0])}</span>${esc(p.split(':').slice(1).join(':'))}</h3>` : ''}
@@ -400,6 +402,14 @@
     };
     $('#chFilter').oninput = e => {
       const q = e.target.value.toLowerCase().trim();
+      if (b.type === 'study') {                      // study books: search inside every section, not only titles
+        const box = $('#secHits'), r = q.length > 1 ? noteHits(b, q, 15) : { total: 0, hits: [], terms: [] };
+        box.innerHTML = q.length > 1 ? `<p class="muted small">${r.total} section${r.total === 1 ? '' : 's'} found</p>` + r.hits.map(n => noteHitHTML(n, r.terms)).join('') : '';
+        const inHits = new Set(q.length > 1 ? noteHits(b, q, 1e5).hits.map(h => h.key) : []);
+        $$('.ch-card').forEach(c => c.style.display = !q || c.dataset.t.includes(q) || inHits.has(decodeURIComponent(c.getAttribute('href').split('/').pop())) ? '' : 'none');
+        $$('.part').forEach(p => p.style.display = $$('.ch-card', p).some(c => c.style.display !== 'none') ? '' : 'none');
+        return;
+      }
       $$('.ch-card').forEach(c => c.style.display = !q || c.dataset.t.includes(q) ? '' : 'none');
       $$('.part').forEach(p => p.style.display = $$('.ch-card', p).some(c => c.style.display !== 'none') ? '' : 'none');
     };
@@ -410,7 +420,7 @@
     return `<a class="ch-card card" href="#/ch/${encodeURIComponent(k)}" data-t="${esc(strip(c.t).toLowerCase())} ${c.n}">
       ${ring(cs.done, 50, 5, pct(cs.done))}
       <div class="grow"><div class="ch-t"><span class="num">${c.n}</span>${c.t}</div>
-      <div class="muted small">${cs.total} ${Books.get(c.bid).type === 'study' ? 'cards' : 'MCQs'}${cs.practice ? ' +' + cs.practice + ' practice' : ''} · ${cs.seen} seen${cs.acc !== null ? ' · ' + pct(cs.acc) + ' acc' : ''} · mastery ${pct(cs.mastery)}${cs.due ? ` · <span class="pill warn">${cs.due} due</span>` : ''}</div>
+      <div class="muted small">${cs.total} ${Books.get(c.bid).type === 'study' ? (Books.get(c.bid).cardWord || 'cards').toLowerCase() : 'MCQs'}${cs.practice ? ' +' + cs.practice + ' practice' : ''} · ${cs.seen} seen${cs.acc !== null ? ' · ' + pct(cs.acc) + ' acc' : ''} · mastery ${pct(cs.mastery)}${cs.due ? ` · <span class="pill warn">${cs.due} due</span>` : ''}</div>
       ${pbar(cs, 'thin')}${chip || cs.skipped ? `<div class="mt-s">${chip}${cs.skipped ? ` <span class="pill skip">⏭ ${cs.skipped} skipped</span>` : ''}</div>` : ''}</div><span class="chev">›</span></a>`;
   }
 
@@ -466,26 +476,63 @@
   function studyBar(b, key) {
     if (b.type !== 'study') return '';
     const c = chData(b, key);
-    return `<div class="row gap wrap mt">${(c.notes || []).length ? `<a class="btn" href="#/read/${encodeURIComponent(key)}">📖 Read</a>` : ''}${c.video ? `<button class="btn ghost" data-video="${esc(c.video.watch || c.video.url)}" data-open="${esc(c.video.url)}">▶️ Watch video</button>` : ''}</div>`;
+    const v = c.video;
+    return `<div class="row gap wrap mt">${(c.notes || []).length ? `<a class="btn" href="#/read/${encodeURIComponent(key)}">📖 ${esc(b.readLabel || 'Read')}</a>` : ''}${v ? `<button class="btn ghost" data-vchap="${esc(key)}">▶️ ${v.file ? 'Watch video' : 'Watch online'}</button>` : ''}</div>`;
   }
+  /* figures in reading notes are stored as markers: swap in the pack's image (or the video poster) */
+  function noteBody(b, key, html) {
+    return html.replace(/<figure class="nfig( nvid)?" data-f="([^"]+)" data-w="(\d+)" data-h="(\d+)"( data-play="1")?>/g, (m, vid, f, w, h) => {
+      const img = `<img loading="lazy" src="${Books.url(b.id, f)}" width="${w}" height="${h}" alt="Figure">`;
+      return vid ? `<figure class="nfig nvid"><button class="nplay" data-vchap="${esc(key)}" aria-label="Play video">${img}<span>▶</span></button>` : `<figure class="nfig"><button class="qimg" data-bid="${b.id}" data-src="${esc(f)}" aria-label="Zoom figure">${img}</button>`;
+    });
+  }
+  const noteSec = (b, key, n, i) => n.refs
+    ? `<details class="card note-sec" id="sec-${i}"><summary><b>${esc(n.h)}</b></summary>${noteBody(b, key, n.html)}</details>`
+    : `<section class="card note-sec" id="sec-${i}"><h2>${esc(n.h)}</h2>${noteBody(b, key, n.html)}${n.pg ? `<div class="src">📖 ${esc(b.short)}, p. ${esc(n.pg)}</div>` : ''}</section>`;
   routes.read = (arg) => {
-    const ch = CH[arg]; if (!ch) return go('#/book/' + bookId());
-    const b = book(ch.bid), c = chData(b, arg), keys = chKeys(ch.bid), i = keys.indexOf(arg);
-    view().innerHTML = `<a class="back" href="#/ch/${encodeURIComponent(arg)}">‹ Chapter</a>
-      <div class="page-head"><h1><span class="num big">${ch.n}</span> ${ch.t}</h1>${studyBar(b, arg).replace(/<a class="btn"[^]*?<\/a>/, '')}</div>
-      <div class="notes">${(c.notes || []).map(n => `<section class="card note-sec"><h2>${esc(n.h)}</h2>${n.html}${n.pg ? `<div class="src">📖 ${esc(b.short)}, p. ${esc(n.pg)}</div>` : ''}</section>`).join('') || '<p class="muted center">No reading notes for this chapter.</p>'}</div>
-      <div class="row between mt">${i > 0 ? `<a class="chip" href="#/read/${encodeURIComponent(keys[i - 1])}">‹ Previous</a>` : '<span></span>'}<a class="btn" href="#/ch/${encodeURIComponent(arg)}">🧠 Test yourself</a>${i < keys.length - 1 ? `<a class="chip" href="#/read/${encodeURIComponent(keys[i + 1])}">Next ›</a>` : '<span></span>'}</div>`;
-    window.scrollTo(0, 0);
+    const parts = String(arg).split('~'), key = parts[0], jump = parts[1];      // #/read/<chapter>~<section>
+    const ch = CH[key]; if (!ch) return go('#/book/' + bookId());
+    const b = book(ch.bid), c = chData(b, key), keys = chKeys(ch.bid), i = keys.indexOf(key), notes = c.notes || [];
+    view().innerHTML = `<a class="back" href="#/ch/${encodeURIComponent(key)}">‹ ${esc(b.chapterWord || 'Chapter')}</a>
+      <div class="page-head"><h1><span class="num big">${ch.n}</span> ${ch.t}</h1>${studyBar(b, key).replace(/<a class="btn"[^]*?<\/a>/, '')}</div>
+      ${notes.length > 4 ? `<details class="card note-toc"><summary><b>Contents</b> <span class="muted small">${notes.length} sections</span></summary>${notes.map((n, k) => `<button class="list-item" data-sec="${k}">${esc(n.h)}${n.pg ? ` <small class="muted">p. ${esc(n.pg)}</small>` : ''}</button>`).join('')}</details>` : ''}
+      <div class="notes">${notes.map((n, k) => noteSec(b, key, n, k)).join('') || '<p class="muted center">No reading notes for this chapter.</p>'}</div>
+      <div class="row between mt">${i > 0 ? `<a class="chip" href="#/read/${encodeURIComponent(keys[i - 1])}">‹ Previous</a>` : '<span></span>'}<a class="btn" href="#/ch/${encodeURIComponent(key)}">🧠 Test yourself</a>${i < keys.length - 1 ? `<a class="chip" href="#/read/${encodeURIComponent(keys[i + 1])}">Next ›</a>` : '<span></span>'}</div>`;
+    const toSec = k => { const s = document.getElementById('sec-' + k); if (!s) return; s.scrollIntoView({ block: 'start' }); s.classList.remove('sec-hit'); void s.offsetWidth; s.classList.add('sec-hit'); };
+    $$('[data-sec]').forEach(x => x.onclick = () => { x.closest('details').open = false; toSec(x.dataset.sec); });
+    if (jump !== undefined) setTimeout(() => toSec(jump), 60); else window.scrollTo(0, 0);
   };
-  function videoPop(src, link) {
+  function videoPop(key) {
+    const b = book(CH[key].bid), v = chData(b, key).video; if (!v) return;
+    const src = v.file ? Books.file(b.id, 'video/' + v.file) : '';
+    if (!src) { window.open(v.url, '_blank', 'noopener'); return; }        // video not inside the pack: the book's own link
+    const poster = v.poster ? Books.url(b.id, v.poster) : '';
     const w = document.createElement('div'); w.className = 'vpop';
-    w.innerHTML = `<div class="vpop-bar"><a href="${esc(link)}" target="_blank" rel="noopener">Open in a new tab</a><button class="btn sm" id="vpopX">✕ Close</button></div><iframe src="${esc(src)}" title="Video" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
-    const fs = () => w.classList.toggle('fs', !!document.fullscreenElement);
-    const close = () => { document.removeEventListener('fullscreenchange', fs); w.remove(); };
+    w.innerHTML = `<div class="vpop-bar"><span class="vpop-t">${esc(v.label || 'Video')}</span><button class="btn sm" id="vpopX">✕ Close</button></div><video src="${src}" ${poster ? `poster="${poster}"` : ''} controls autoplay playsinline preload="metadata"></video>`;
+    const vid = w.querySelector('video'), fs = () => w.classList.toggle('fs', !!document.fullscreenElement);
+    const close = () => { document.removeEventListener('fullscreenchange', fs); vid.pause(); vid.removeAttribute('src'); vid.load(); w.remove(); };
     document.addEventListener('fullscreenchange', fs);
     document.body.appendChild(w); w.querySelector('#vpopX').onclick = close;
   }
-  document.addEventListener('click', e => { const b = e.target.closest('[data-video]'); if (!b) return; e.preventDefault(); videoPop(b.dataset.video, b.dataset.open); });
+  document.addEventListener('click', e => { const b = e.target.closest('[data-vchap]'); if (!b) return; e.preventDefault(); videoPop(b.dataset.vchap); });
+
+  /* section-level search of a study book: every word must appear; headings and "Indications" sections rank first */
+  const queryTerms = q => q.toLowerCase().split(/\s+/).filter(Boolean);
+  const markTerms = (s, terms) => terms.length ? s.replace(new RegExp('(' + terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')(?![^<]*>)', 'gi'), '<mark>$1</mark>') : s;
+  function noteHits(b, q, limit) {
+    const terms = queryTerms(q), hits = [];
+    b.chapters.forEach(c => (c.notes || []).forEach((n, i) => {
+      if (n.refs) return;
+      if (n._p === undefined) { n._p = strip(n.html); n._l = (n.h + ' ' + n._p).toLowerCase(); n._h = n.h.toLowerCase(); }
+      if (!terms.every(t => n._l.includes(t))) return;
+      const at = Math.max(0, n._p.toLowerCase().indexOf(terms[0])), from = Math.max(0, at - 60);
+      const score = terms.filter(t => n._h.includes(t)).length * 3 + (/indication|summary/.test(n._h) ? 2 : 0);
+      hits.push({ key: Store.chKey(b.id, c.n), i, step: n.step, guided: b.design === 'guided', h: n.h, pg: n.pg, score, snip: (from ? '…' : '') + n._p.slice(from, from + 200) + '…' });
+    }));
+    hits.sort((x, y) => y.score - x.score);
+    return { total: hits.length, hits: hits.slice(0, limit), terms };
+  }
+  const noteHitHTML = (x, terms) => `<a class="card s-item note-hit" href="${x.guided ? `#/guide/${encodeURIComponent(x.key)}~${x.step}` : `#/read/${encodeURIComponent(x.key)}~${x.i}`}"><div class="muted small">📖 ${chTitle(x.key)} · ${esc(x.h)}${x.pg ? ' · p. ' + esc(x.pg) : ''}</div><div class="s-stem">${markTerms(esc(x.snip), terms)}</div></a>`;
 
   // ---------- study hub & games ----------
   const bookSwitch = () => {
@@ -521,20 +568,18 @@
       const res = [];
       for (const id of Store.ALL) {
         const x = Q[id]; if (scope !== 'all' && x.bid !== scope) continue;
-        const hay = (strip(x.s) + ' ' + strip(x.g || '') + ' ' + x.o.map(strip).join(' ')).toLowerCase();
+        const hay = (strip(x.s) + ' ' + (x.open ? '' : strip(x.g || '') + ' ') + x.o.map(strip).join(' ')).toLowerCase();     // a case's presentation repeats on all its cards: found once via its reading section
         if (hay.includes(q)) { res.push(x); if (res.length >= 80) break; }
       }
       const hl = s => s.replace(new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')(?![^<]*>)', 'gi'), '<mark>$1</mark>');
-      const noteHits = [];
-      Books.list().filter(b => b.type === 'study' && (scope === 'all' || b.id === scope)).forEach(b => b.chapters.forEach(c => (c.notes || []).forEach(n => {
-        const t = strip(n.html), at = (n.h + ' ' + t).toLowerCase().indexOf(q); if (at < 0 || noteHits.length >= 40) return;
-        const from = Math.max(0, at - n.h.length - 60);
-        noteHits.push({ key: Store.chKey(b.id, c.n), h: n.h, pg: n.pg, snip: (from ? '…' : '') + esc(t.slice(from, from + 190)) + '…' });
-      })));
-      $('#sres').innerHTML = `<p class="muted small">${res.length >= 80 ? '80+' : res.length} questions · ${noteHits.length} reading sections</p>` + noteHits.map(n => `
-        <div class="card s-item"><div class="muted small"><a href="#/read/${encodeURIComponent(n.key)}">📖 ${chTitle(n.key)}</a> · ${esc(n.h)}${n.pg ? ' · p. ' + esc(n.pg) : ''}</div><div class="s-stem">${hl(n.snip)}</div></div>`).join('') + res.map(x => `
+      let noteTotal = 0, noteRows = '';
+      Books.list().filter(b => b.type === 'study' && (scope === 'all' || b.id === scope)).forEach(b => {
+        const r = noteHits(b, q, 30); noteTotal += r.total;
+        noteRows += r.hits.map(n => noteHitHTML(n, r.terms)).join('');
+      });
+      $('#sres').innerHTML = `<p class="muted small">${res.length >= 80 ? '80+' : res.length} questions · ${noteTotal} reading sections</p>` + noteRows + res.map(x => `
         <div class="card s-item"><div class="muted small"><a href="#/ch/${encodeURIComponent(x.ch)}">${chTitle(x.ch)}</a> · Q${x.n}</div><div class="s-stem">${hl(x.s || strip(x.g || ''))}${x.img ? ' 🖼️' : ''}</div>
-        <div class="s-ans">${x.open ? hl(x.o[0]) : x.nk ? '— no key in the book' : '✅ ' + correctSet(x).map(i => L(i) + '. ' + hl(optText(x, i))).join(' · ')}</div></div>`).join('');
+        <div class="s-ans">${x.open ? hl(esc(strip(x.o[0]).slice(0, 260))) + (strip(x.o[0]).length > 260 ? '…' : '') : x.nk ? '— no key in the book' : '✅ ' + correctSet(x).map(i => L(i) + '. ' + hl(optText(x, i))).join(' · ')}</div></div>`).join('');
     };
     $$('#sScope [data-s]').forEach(b => b.onclick = () => { scope = b.dataset.s; $$('#sScope [data-s]').forEach(x => x.classList.toggle('on', x === b)); run(); });
     $('#sq').oninput = run; run(); $('#sq').focus();
@@ -847,7 +892,7 @@
     $, $$, esc, strip, shuffle, L, toast, ago, modal, confirmBox, ring, animateRings, go, render, fmtMs, fmtIvl, chTitle, chShort, qLabel,
     stemHTML, bookExpHTML, optsPrev, optText, keyText, keyLetters, correctSet, isRight, refLine, noteLine, book, bookId, chKeys,
     unlock, checkAch, levelUp, doExport, needBackup, installEvt: null, addPack,
-    setLeaveGuard(fn) { leaveGuard = fn; }, routes, applyTheme
+    setLeaveGuard(fn) { leaveGuard = fn; }, routes, applyTheme, noteHits, noteHitHTML
   };
 
   // ---------- boot ----------

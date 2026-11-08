@@ -57,7 +57,7 @@
     return {
       v: 1, created: Date.now(),
       settings: { name: '', goal: 40, theme: 'auto', sound: true, haptics: true, recallFirst: false, shuffleOpts: false, examSecs: 72, fontScale: 1 },
-      cards: {}, log: [], daily: {}, xp: 0, ach: {}, flags: {}, skips: {}, sessions: [], best: {},
+      cards: {}, log: [], daily: {}, xp: 0, ach: {}, flags: {}, skips: {}, sessions: [], best: {}, guide: {},
       lastBackup: 0, sinceBackup: 0, backupNag: 0
     };
   }
@@ -236,6 +236,12 @@
     Object.assign(S.ach, st.ach || {});
     S.flags = mergeStamp(S.flags, st.flags || {});
     S.skips = mergeStamp(S.skips || {}, st.skips || {});
+    S.guide = S.guide || {};
+    for (const k in st.guide || {}) {        // guided books: furthest step and finished flag survive, newest position wins
+      const a = S.guide[k], b = st.guide[k];
+      const win = !a || (b.ts || 0) > (a.ts || 0) ? b : a;
+      S.guide[k] = Object.assign({}, win, { max: Math.max(a ? a.max : -1, b.max), fin: (a && a.fin) || b.fin || 0 });
+    }
     for (const k in (st.best || {})) if (!S.best[k] || st.best[k] > S.best[k]) S.best[k] = st.best[k];
     const ss = new Set(S.sessions.map(x => x.ts));
     S.sessions = S.sessions.concat((st.sessions || []).filter(x => !ss.has(x.ts))).sort((a, b) => a.ts - b.ts).slice(-800);

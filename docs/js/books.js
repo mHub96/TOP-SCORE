@@ -82,6 +82,10 @@
     const id = h.book && h.book.id;
     if (!id || id === 'ts') throw new Error('The book pack has no valid id.');
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    if (file.size > 200 * 1048576 && navigator.storage && navigator.storage.estimate) {      // video packs: say so plainly instead of failing halfway
+      const e = await navigator.storage.estimate().catch(() => null);
+      if (e && e.quota && file.size > e.quota - (e.usage || 0)) throw new Error(`This pack needs ${(file.size / 1073741824).toFixed(1)} GB of browser storage, but only ${((e.quota - (e.usage || 0)) / 1073741824).toFixed(1)} GB is free on this device.`);
+    }
     await op('readwrite', s => s.put({ blob: file, header: h, name: file.name, at: Date.now(), server: !!opts.server, uid: opts.uid || null, updated: opts.updated || 0 }, id));
     const rec = await op('readonly', s => s.get(id));
     const old = BOOKS[id]; if (old && old.urls) Object.values(old.urls).forEach(u => URL.revokeObjectURL(u));
@@ -100,6 +104,12 @@
     if (!b.urls[name]) { const p = part(b.rec, 'img/' + name); if (!p) return ''; b.urls[name] = URL.createObjectURL(p); }
     return b.urls[name];
   }
+  /* any stored file of a pack, by its full name in the pack (e.g. 'video/ch04.mp4'); '' when the pack has no such file */
+  function file(bid, name) {
+    const b = BOOKS[bid]; if (!b || !b.rec) return '';
+    if (!b.urls[name]) { const p = part(b.rec, name); if (!p) return ''; b.urls[name] = URL.createObjectURL(p); }
+    return b.urls[name];
+  }
   /* the book's front cover image (null when the book has none) */
   function cover(bid) {
     const b = BOOKS[bid]; if (!b) return null;
@@ -112,7 +122,7 @@
   function setCurrent(id) { try { localStorage.setItem(CUR_KEY, id); } catch (e) { } }
 
   window.Books = {
-    ready, load, remove, url, cover, current, setCurrent, readHeader,
+    ready, load, remove, url, file, cover, current, setCurrent, readHeader,
     get: id => BOOKS[id], list: () => ORDER.map(id => BOOKS[id]), all: BOOKS
   };
 })();

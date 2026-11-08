@@ -1,9 +1,9 @@
 /* TOP SCORE service worker — offline-first app shell. Bump VERSION on every deploy. */
-const VERSION = 'topscore-v3.7.0';
+const VERSION = 'topscore-v3.9.0';
 const AUTH = 'topscore-auth';      // holds the login token so push notifications can be fetched while the app is closed
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
-  'js/data.js', 'js/fsrs.js', 'js/books.js', 'js/store.js', 'js/sync.js', 'js/account.js', 'js/explain.js', 'js/fx.js', 'js/charts.js', 'js/app.js', 'js/modes.js', 'js/qrcode.js', 'js/exam.js',
+  'js/data.js', 'js/fsrs.js', 'js/books.js', 'js/store.js', 'js/sync.js', 'js/account.js', 'js/explain.js', 'js/fx.js', 'js/charts.js', 'js/app.js', 'js/modes.js', 'js/qrcode.js', 'js/exam.js', 'js/designs.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png', 'icons/ts-cover.webp', 'icons/badge-96.png'
 ];
 self.addEventListener('install', e => {
