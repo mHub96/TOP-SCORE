@@ -362,7 +362,13 @@
   };
 
   // ---------- arena: leaderboard + challenges ----------
-  let lbPeriod = 'all';
+  let lbPeriod = 'all', lbMetric = 'correct';
+  const METRICS = {
+    correct: ['Correct', r => r.good],
+    xp: ['XP', r => (lbPeriod === 'week' ? r.week_xp : r.xp) || 0],
+    mastered: ['Known + mastered', r => r.mastered || 0]
+  };
+  const lbTabs = () => Object.keys(METRICS).filter(k => lbPeriod === 'all' || k !== 'mastered');   // mastery has no weekly figure
   App.routes.arena = async (arg) => {
     const v = $('#view'), tab = ['challenges', 'exam'].includes(arg) ? arg : 'leaders';
     v.innerHTML = `<div class="page-head"><h1>⚔️ Arena</h1><div class="seg" id="arTab"><button data-t="leaders" class="${tab === 'leaders' ? 'on' : ''}">🏆 Leaderboard</button><button data-t="challenges" class="${tab === 'challenges' ? 'on' : ''}">⚔️ Challenges</button><button data-t="exam" class="${tab === 'exam' ? 'on' : ''}">🖥️ Exam room</button></div></div><div id="arBody" class="muted">Loading…</div>`;
@@ -379,13 +385,15 @@
       const rows = d.rows.map(r => {
         const correct = (week ? r.week_correct : r.correct) || 0;
         return Object.assign({}, r, { good: correct, bad: Math.max(0, ((week ? r.week_answered : r.answered) || 0) - correct) });
-      }).sort((a, b) => b.good - a.good);
+      }).map(r => Object.assign(r, { v: METRICS[lbMetric][1](r) })).sort((a, b) => b.v - a.v);
       const medal = i => ['🥇', '🥈', '🥉'][i] || (i + 1);
       $('#arBody').innerHTML = `
-        <div class="row gap wrap lb-ctl"><div class="seg" id="lbP"><button data-p="week" class="${week ? 'on' : ''}">This week</button><button data-p="all" class="${week ? '' : 'on'}">All time</button></div></div>
-        <section class="card lb">${rows.map((r, i) => `<div class="lb-row ${r.id === d.me ? 'me' : ''}" style="--d:${i * 50}ms"><span class="lb-rank">${medal(i)}</span><span class="acct-av sm">${esc((r.display || '?')[0].toUpperCase())}</span><span class="grow"><b>${esc(r.display)}</b>${r.id === d.me ? ' <small class="muted">(you)</small>' : ''}<br><small class="muted">✅ ${r.good.toLocaleString()} correct · ❌ ${r.bad.toLocaleString()} incorrect · ${r.streak || 0}🔥</small></span><b class="lb-v">${r.good.toLocaleString()}</b></div>`).join('') || '<p class="muted">No one on the board yet — answer some questions!</p>'}</section>
-        <p class="muted small center">Ranked by correct answers only. Each question counts once: correct if you have ever got it right, incorrect if you have not yet. Turn “Show me on the leaderboards” off in Settings to hide yourself.</p>`;
-      $$('#lbP button').forEach(b => b.onclick = () => { lbPeriod = b.dataset.p; draw(); });
+        <div class="row gap wrap lb-ctl"><div class="seg" id="lbP"><button data-p="week" class="${week ? 'on' : ''}">This week</button><button data-p="all" class="${week ? '' : 'on'}">All time</button></div>
+        <div class="book-switch" id="lbM">${lbTabs().map(k => `<button class="chip ${k === lbMetric ? 'on' : ''}" data-m="${k}">${METRICS[k][0]}</button>`).join('')}</div></div>
+        <section class="card lb">${rows.map((r, i) => `<div class="lb-row ${r.id === d.me ? 'me' : ''}" style="--d:${i * 50}ms"><span class="lb-rank">${medal(i)}</span><span class="acct-av sm">${esc((r.display || '?')[0].toUpperCase())}</span><span class="grow"><b>${esc(r.display)}</b>${r.id === d.me ? ' <small class="muted">(you)</small>' : ''}<br><small class="muted">✅ ${r.good.toLocaleString()} correct · ❌ ${r.bad.toLocaleString()} incorrect · ${r.streak || 0}🔥</small></span><b class="lb-v">${r.v.toLocaleString()}</b></div>`).join('') || '<p class="muted">No one on the board yet — answer some questions!</p>'}</section>
+        <p class="muted small center">Ranked by ${METRICS[lbMetric][0].toLowerCase()}${lbMetric === 'correct' ? ' answers' : ''}. Each question counts once: correct if you have ever got it right, incorrect if you have not yet. Turn “Show me on the leaderboards” off in Settings to hide yourself.</p>`;
+      $$('#lbP button').forEach(b => b.onclick = () => { lbPeriod = b.dataset.p; if (!lbTabs().includes(lbMetric)) lbMetric = 'correct'; draw(); });
+      $$('#lbM button').forEach(b => b.onclick = () => { lbMetric = b.dataset.m; draw(); });
     };
     draw();
   }

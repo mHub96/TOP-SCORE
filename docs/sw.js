@@ -1,5 +1,5 @@
 /* TOP SCORE service worker — offline-first app shell. Bump VERSION on every deploy. */
-const VERSION = 'topscore-v3.5.0';
+const VERSION = 'topscore-v3.5.1';
 const AUTH = 'topscore-auth';      // holds the login token so push notifications can be fetched while the app is closed
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
