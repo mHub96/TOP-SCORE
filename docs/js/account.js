@@ -362,7 +362,7 @@
   };
 
   // ---------- arena: leaderboard + challenges ----------
-  let lbPeriod = 'all', lbMetric = 'xp';
+  let lbPeriod = 'all';
   App.routes.arena = async (arg) => {
     const v = $('#view'), tab = ['challenges', 'exam'].includes(arg) ? arg : 'leaders';
     v.innerHTML = `<div class="page-head"><h1>⚔️ Arena</h1><div class="seg" id="arTab"><button data-t="leaders" class="${tab === 'leaders' ? 'on' : ''}">🏆 Leaderboard</button><button data-t="challenges" class="${tab === 'challenges' ? 'on' : ''}">⚔️ Challenges</button><button data-t="exam" class="${tab === 'exam' ? 'on' : ''}">🖥️ Exam room</button></div></div><div id="arBody" class="muted">Loading…</div>`;
@@ -371,27 +371,21 @@
     if (tab === 'leaders') return leaders();
     return challenges();
   };
-  const METRICS = {
-    xp: ['XP', r => lbPeriod === 'week' ? r.week_xp : r.xp, v => v.toLocaleString()],
-    answered: ['Answered', r => lbPeriod === 'week' ? r.week_answered : r.answered, v => v.toLocaleString()],
-    accuracy: ['Accuracy', r => { const a = lbPeriod === 'week' ? r.week_answered : r.answered, c = lbPeriod === 'week' ? r.week_correct : r.correct; return a >= 20 ? c / a : -1; }, v => v < 0 ? '—' : Math.round(v * 100) + '%'],
-    mastered: ['Known + mastered', r => r.mastered, v => v.toLocaleString()],
-    streak: ['Streak', r => r.streak, v => v + ' 🔥']
-  };
   async function leaders() {
     try { if (window.Sync) await Sync.sync('lb'); } catch (e) { }
     let d; try { d = await api('/leaderboard'); } catch (e) { $('#arBody').textContent = '⚠️ ' + e.message; return; }
     const draw = () => {
-      const [label, get, fmt] = METRICS[lbMetric];
-      const rows = d.rows.map(r => Object.assign({}, r, { v: get(r) })).sort((a, b) => b.v - a.v);
+      const week = lbPeriod === 'week';
+      const rows = d.rows.map(r => {
+        const correct = (week ? r.week_correct : r.correct) || 0;
+        return Object.assign({}, r, { good: correct, bad: Math.max(0, ((week ? r.week_answered : r.answered) || 0) - correct) });
+      }).sort((a, b) => b.good - a.good);
       const medal = i => ['🥇', '🥈', '🥉'][i] || (i + 1);
       $('#arBody').innerHTML = `
-        <div class="row gap wrap lb-ctl"><div class="seg" id="lbP"><button data-p="week" class="${lbPeriod === 'week' ? 'on' : ''}">This week</button><button data-p="all" class="${lbPeriod === 'all' ? 'on' : ''}">All time</button></div>
-        <div class="book-switch" id="lbM">${Object.entries(METRICS).filter(([k]) => lbPeriod === 'all' || ['xp', 'answered', 'accuracy'].includes(k)).map(([k, m]) => `<button class="chip ${k === lbMetric ? 'on' : ''}" data-m="${k}">${m[0]}</button>`).join('')}</div></div>
-        <section class="card lb">${rows.map((r, i) => `<div class="lb-row ${r.id === d.me ? 'me' : ''}" style="--d:${i * 50}ms"><span class="lb-rank">${medal(i)}</span><span class="acct-av sm">${esc((r.display || '?')[0].toUpperCase())}</span><span class="grow"><b>${esc(r.display)}</b>${r.id === d.me ? ' <small class="muted">(you)</small>' : ''}<br><small class="muted">${(r.answered || 0).toLocaleString()} answers · ${r.answered ? Math.round(r.correct / r.answered * 100) : 0}% · ${r.streak || 0}🔥</small></span><b class="lb-v">${fmt(r.v)}</b></div>`).join('') || '<p class="muted">No one on the board yet — answer some questions!</p>'}</section>
-        <p class="muted small center">Ranked by ${label.toLowerCase()}${lbMetric === 'accuracy' ? ' (at least 20 answers)' : ''}. Turn “Show me on the leaderboards” off in Settings to hide yourself.</p>`;
-      $$('#lbP button').forEach(b => b.onclick = () => { lbPeriod = b.dataset.p; if (lbPeriod === 'week' && !['xp', 'answered', 'accuracy'].includes(lbMetric)) lbMetric = 'xp'; draw(); });
-      $$('#lbM button').forEach(b => b.onclick = () => { lbMetric = b.dataset.m; draw(); });
+        <div class="row gap wrap lb-ctl"><div class="seg" id="lbP"><button data-p="week" class="${week ? 'on' : ''}">This week</button><button data-p="all" class="${week ? '' : 'on'}">All time</button></div></div>
+        <section class="card lb">${rows.map((r, i) => `<div class="lb-row ${r.id === d.me ? 'me' : ''}" style="--d:${i * 50}ms"><span class="lb-rank">${medal(i)}</span><span class="acct-av sm">${esc((r.display || '?')[0].toUpperCase())}</span><span class="grow"><b>${esc(r.display)}</b>${r.id === d.me ? ' <small class="muted">(you)</small>' : ''}<br><small class="muted">✅ ${r.good.toLocaleString()} correct · ❌ ${r.bad.toLocaleString()} incorrect · ${r.streak || 0}🔥</small></span><b class="lb-v">${r.good.toLocaleString()}</b></div>`).join('') || '<p class="muted">No one on the board yet — answer some questions!</p>'}</section>
+        <p class="muted small center">Ranked by correct answers only. Each question counts once: correct if you have ever got it right, incorrect if you have not yet. Turn “Show me on the leaderboards” off in Settings to hide yourself.</p>`;
+      $$('#lbP button').forEach(b => b.onclick = () => { lbPeriod = b.dataset.p; draw(); });
     };
     draw();
   }

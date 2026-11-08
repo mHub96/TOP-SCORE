@@ -163,6 +163,14 @@
     save();
     return c;
   }
+  // true right after the answer that got this question right for the first time ever: the only answer that earns XP
+  const firstCorrect = id => { const c = S.cards[id]; return !!c && c.ok === 1 && c.c === 1; };
+  // every question counts once: correct if it was ever answered right, otherwise incorrect
+  function tally() {
+    let correct = 0, incorrect = 0;
+    for (const id in S.cards) { const c = S.cards[id]; if (c.c > 0) correct++; else if (c.w > 0) incorrect++; }
+    return { correct, incorrect };
+  }
   // flashcard rating without MCQ (counts as correct unless Again)
   function rate(id, g, mode) { return answer(id, g > 1, { grade: g, mode }); }
 
@@ -206,7 +214,8 @@
   function mergeState(st, opts = {}) {
     for (const id in st.cards || {}) {
       const a = S.cards[id], b = st.cards[id];
-      if (!a || (b.last || 0) > (a.last || 0)) S.cards[id] = b;
+      const win = !a || (b.last || 0) > (a.last || 0) ? b : a;   // newest review wins, but a question once answered right stays credited
+      S.cards[id] = a ? Object.assign({}, win, { c: Math.max(a.c || 0, b.c || 0), w: Math.max(a.w || 0, b.w || 0) }) : b;
     }
     for (const d in st.daily || {}) {
       const a = S.daily[d], b = st.daily[d];
@@ -260,7 +269,7 @@
   window.Store = {
     get S() { return S; }, set S(v) { S = v; },
     Q, CH, ALL, BK, TIERS, RANKS, chKey, indexBook, unindexBook, syncBooks, keyed, isKeyed, answers, multi, allKeyed,
-    today, tier, statsOf, chapterStats, bookStats, globalTiers, dueIds, lastTouched, levelInfo, addXP, answer, rate,
+    today, tier, statsOf, chapterStats, bookStats, globalTiers, dueIds, lastTouched, levelInfo, addXP, answer, rate, firstCorrect, tally,
     streak, bestStreak, session, setBest, toggleFlag, isFlagged, isSkipped, setSkip, toggleSkip, clearSkips, mergeState, exportData, importData, reset, save, day, storageBytes
   };
 })();

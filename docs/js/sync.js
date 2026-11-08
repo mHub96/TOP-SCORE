@@ -34,13 +34,21 @@
   /* leaderboard summary of this account */
   function stats() {
     const S = Store.S, wk = weekKey();
-    let a = 0, c = 0, wa = 0, wc = 0, wx = 0;
+    let wc = 0, wi = 0, wx = 0;
     for (const d in S.daily) {
-      const x = S.daily[d]; a += x.a || 0; c += x.c || 0;
-      if (weekKey(new Date(d + 'T12:00').getTime()) === wk) { wa += x.a || 0; wc += x.c || 0; wx += x.xp || 0; }
+      const x = S.daily[d];
+      if (weekKey(new Date(d + 'T12:00').getTime()) === wk) wx += x.xp || 0;
     }
-    const t = Store.globalTiers();
-    return { xp: S.xp, answered: a, correct: c, mastered: t[3] + t[4], streak: Store.streak(), best_streak: Store.bestStreak(), week: wk, week_answered: wa, week_correct: wc, week_xp: wx };
+    // a question belongs to this week only if this week is when it was first answered / first got right
+    const seen = {};
+    S.log.forEach(l => { const s = seen[l[1]] || (seen[l[1]] = { t: l[0], r: 0, n: 0, g: 0 }); s.n++; if (l[2]) { s.g++; s.r = s.r || l[0]; } });
+    for (const id in seen) {
+      const s = seen[id], k = S.cards[id] || {};
+      if (s.r && weekKey(s.r * 1000) === wk && s.g >= (k.c || 0)) wc++;
+      if (!(k.c > 0) && weekKey(s.t * 1000) === wk && s.n >= (k.w || 0)) wi++;
+    }
+    const t = Store.globalTiers(), all = Store.tally();
+    return { v: 2, xp: S.xp, answered: all.correct + all.incorrect, correct: all.correct, mastered: t[3] + t[4], streak: Store.streak(), best_streak: Store.bestStreak(), week: wk, week_answered: wc + wi, week_correct: wc, week_xp: wx };
   }
   function absorb(remote) {
     if (!remote || !remote.state) return;

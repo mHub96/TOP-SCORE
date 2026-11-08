@@ -367,7 +367,7 @@
       Resume.save();
       if (cfg.duel) duelSend(false);
       const fxEl = btn || $('.opt');
-      if (gain) { R.xp += gain; Store.addXP(gain); FX.floatText(fxEl, '+' + gain + ' XP'); }
+      if (gain && Store.firstCorrect(id)) { R.xp += gain; Store.addXP(gain); FX.floatText(fxEl, '+' + gain + ' XP'); }
       $$('.opt').forEach(b => { b.disabled = true; if (isRight(q, +b.dataset.oi)) b.classList.add('right'); else if (Array.isArray(oi) && picks.includes(+b.dataset.oi)) b.classList.add('wrong'); });
       App.checkAch({ combo: R.maxCombo, calib: !!conf });
       hud();
@@ -458,7 +458,7 @@
       else if (cfg.boss) {
         const win = R.bossHp <= 0;
         headline = win ? 'Victory! 🏆' : 'Defeated 💀'; sub = win ? `${esc(R.bossName)} has fallen.` : `${esc(R.bossName)} had ${R.bossHp} HP left. Train and return!`;
-        if (win) { App.unlock('boss'); Store.addXP(100); R.xp += 100; }
+        if (win) { App.unlock('boss'); if (!Store.S.best['boss-' + (cfg.chapters ? cfg.chapters[0] : 0)]) { Store.addXP(100); R.xp += 100; } }   // once per boss
         bestKey = 'boss-' + (cfg.chapters ? cfg.chapters[0] : 0); bestVal = win ? 1 : null;
       } else {
         headline = answered ? pctv + '%' : '—'; sub = `${R.correct} of ${answered} correct${R.practice ? ` · ${R.practice} practice (unscored)` : ''}${skippedN ? ` · ${skippedN} skipped` : ''}${R.maxCombo > 2 ? ` · best combo ${R.maxCombo}×` : ''}`;
@@ -619,10 +619,10 @@
         const q = Q[id], multi = Store.multi(q);
         const oi = multi ? (E.ans[id] || []) : (E.ans[id] ?? -1);
         const ok = multi ? sameSet(oi, correctSet(q)) : (isRight(q, oi) && correctSet(q).length === 1);
-        Store.answer(id, ok, { mode: 'exam', ms: E.time[id] || 0 }); return { id, oi, ok };
+        Store.answer(id, ok, { mode: 'exam', ms: E.time[id] || 0 }); return { id, oi, ok, first: ok && Store.firstCorrect(id) };
       });
       const c = answers.filter(a => a.ok).length, p = Math.round(c / n * 100);
-      Store.addXP(c * 12);
+      Store.addXP(answers.filter(a => a.first).length * 12);
       Store.session({ mode: 'exam', name: 'Exam Simulator', scope: cfg.scope, score: c, total: n });
       const best = Store.setBest('exam', p);
       if (p >= 80 && n >= 50) App.unlock('exam80');
@@ -741,7 +741,7 @@
       if (!flipped) { flip(); return; }
       const id = queue.shift();
       Store.rate(id, g, 'flash');
-      const gain = [0, 2, 6, 10, 12][g]; xp += gain; Store.addXP(gain);
+      const gain = g > 1 && Store.firstCorrect(id) ? [0, 2, 6, 10, 12][g] : 0; xp += gain; Store.addXP(gain);
       if (g === 1) { again++; queue.splice(Math.min(queue.length, 3 + Math.floor(Math.random() * 3)), 0, id); FX.play('wrong'); }
       else { done++; FX.play('correct'); }
       Resume.save();
@@ -816,7 +816,7 @@
       Store.answer(it.id, ok, { mode: 'tf' });
       res.push({ id: it.id, oi: ok ? correctSet(q) : (it.truth ? -1 : it.oi), ok });
       const stamp = $('#stamp'); stamp.textContent = ok ? '✓' : '✗'; stamp.className = 'tf-stamp on ' + (ok ? 'good' : 'bad');
-      if (ok) { correct++; combo++; maxC = Math.max(maxC, combo); score += 100 * (1 + Math.floor(combo / 4)); const g = 6 + Math.min(combo, 8); xp += g; Store.addXP(g); FX.play('correct'); FX.burst($('#tfc'), '#34d399'); FX.buzz(15); }
+      if (ok) { correct++; combo++; maxC = Math.max(maxC, combo); score += 100 * (1 + Math.floor(combo / 4)); const g = Store.firstCorrect(it.id) ? 6 + Math.min(combo, 8) : 0; xp += g; Store.addXP(g); FX.play('correct'); FX.burst($('#tfc'), '#34d399'); FX.buzz(15); }
       else { combo = 0; FX.play('wrong'); FX.buzz([40, 30, 40]); $('#tfc').classList.add('shake'); }
       $('#fb').innerHTML = `<div class="fb ${ok ? 'good' : 'bad'} pop-in"><div class="fb-h">${ok ? 'Correct!' : 'Wrong!'} The statement was <b>${it.truth ? 'TRUE' : 'FALSE'}</b>.</div><div class="fb-key">Book key: <b>${keyText(q)}</b></div>${noteLine(q)}${bookExpHTML(q, !ok)}<div class="xp" id="xp"></div><button class="btn block" id="nextBtn">Next ›</button></div>`;
       $('#nextBtn').onclick = () => { i++; draw(); };
@@ -872,7 +872,7 @@
         if (ok) {
           Store.answer(b.dataset.id, true, { mode: 'match' });
           [selL, b].forEach(x => { x.classList.add('matched'); setTimeout(() => x.classList.add('gone'), 450); });
-          FX.burst(b, '#34d399'); FX.play('correct'); FX.buzz(15); pts += 100; xp += 8; Store.addXP(8); left--; selL = null; Resume.save();
+          FX.burst(b, '#34d399'); FX.play('correct'); FX.buzz(15); pts += 100; if (Store.firstCorrect(b.dataset.id)) { xp += 8; Store.addXP(8); } left--; selL = null; Resume.save();
           if (!left) { clearInterval(tm); const secs = (Date.now() - rs) / 1000; const bonus = Math.max(0, Math.round(300 - secs * 5)); pts += bonus; if (!miss) { pts += 200; App.unlock('match'); } setTimeout(() => { round++; toast(`Round clear! ${bonus ? '+' + bonus + ' speed bonus' : ''}${!miss ? ' · +200 flawless' : ''}`); round < rounds ? board() : end(); }, 650); }
         } else {
           miss++; totalMiss++; Store.answer(selL.dataset.id, false, { mode: 'match' });
@@ -925,8 +925,8 @@
           b.disabled = true; b.classList.add('out'); alive--; pts += 25; FX.play('tap'); FX.floatText(b, '+25');
           if (alive === good.length) {
             $$('.opt').forEach(x => { if (good.includes(+x.dataset.oi)) x.classList.add('right'); x.disabled = true; });
-            pts += 50; wins++; const g = 12; xp += g; Store.addXP(g); FX.play('correct'); FX.burst($('.opt.right'), '#34d399');
-            Store.answer(id, true, { mode: 'knockout' }); res.push({ id, oi: good.length > 1 ? good : good[0], ok: true });
+            pts += 50; wins++; Store.answer(id, true, { mode: 'knockout' }); const g = Store.firstCorrect(id) ? 12 : 0; xp += g; Store.addXP(g); FX.play('correct'); FX.burst($('.opt.right'), '#34d399');
+            res.push({ id, oi: good.length > 1 ? good : good[0], ok: true });
             done(true);
           }
         }

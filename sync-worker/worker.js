@@ -556,6 +556,7 @@ function weekKey(t = Date.now()) {
   return d.getUTCFullYear() + '-W' + String(Math.ceil(((d - y) / 86400000 + 1) / 7)).padStart(2, '0');
 }
 async function saveStats(env, uid, s) {
+  if (s.v !== 2) return;      // an old cached app still counting repeats must not overwrite the corrected numbers
   const n = k => Math.max(0, Math.round(Number(s[k]) || 0));
   await env.DB.prepare(`INSERT INTO stats (user_id, xp, answered, correct, mastered, streak, best_streak, week, week_answered, week_correct, week_xp, updated)
     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
