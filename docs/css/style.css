@@ -1018,6 +1018,8 @@ input, select, textarea { font-size: max(16px, 1em); }
 .ds-step li, .ds-pres li, .ds-answer li { margin: .3em 0; }
 .ds-video { display: block; width: 100%; border-radius: 12px; background: #000; aspect-ratio: 16 / 9; }
 .ds-vcap { color: var(--ink2); font-size: .92em; }
+iframe.ds-video { border: 0; }
+.ds-stream { margin: 6px 0 0; }
 .ds-nav { display: flex; justify-content: space-between; gap: 12px; margin: 14px 0; }
 .ds-nav .btn { min-width: 112px; text-align: center; justify-content: center; }
 .ds-outline { padding: 6px 14px; }

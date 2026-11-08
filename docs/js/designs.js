@@ -53,7 +53,7 @@
       <div class="page-head"><input class="search" id="dsFind" placeholder="${esc(b.searchHint || 'Search…')}" autocomplete="off"></div><div id="dsHits"></div>
       ${listBy(b, k => {
         const g = gState(k), n = gSteps(b, k).length, c = chOf(b, k), dn = g.fin ? n : Math.min(n, g.max + 1);
-        return `<a class="ch-card card" href="#/ch/${enc(k)}" data-key="${esc(k)}" data-t="${esc(App.strip(CH[k].t).toLowerCase())} ${CH[k].n}">${ring(n ? dn / n : 0, 50, 5, pct(n ? dn / n : 0))}<div class="grow"><div class="ch-t"><span class="num">${CH[k].n}</span>${CH[k].t}</div><div class="muted small">${n} steps${c.video && c.video.file ? ' · 🎬 video' : ''}${g.fin ? ' · ✓ done' : ''}</div></div><span class="chev">›</span></a>`;
+        return `<a class="ch-card card" href="#/ch/${enc(k)}" data-key="${esc(k)}" data-t="${esc(App.strip(CH[k].t).toLowerCase())} ${CH[k].n}">${ring(n ? dn / n : 0, 50, 5, pct(n ? dn / n : 0))}<div class="grow"><div class="ch-t"><span class="num">${CH[k].n}</span>${CH[k].t}</div><div class="muted small">${n} steps${c.video ? ' · 🎬 video' : ''}${g.fin ? ' · ✓ done' : ''}</div></div><span class="chev">›</span></a>`;
       })}`;
     bindSearch(b);
   }
@@ -80,7 +80,12 @@
     let media = '';
     if (s.video) {
       const v = c.video, src = v.file ? Books.file(b.id, 'video/' + v.file) : '', poster = v.poster ? Books.url(b.id, v.poster) : '';
-      media = src ? `<video class="ds-video" src="${src}" ${poster ? `poster="${poster}"` : ''} controls playsinline preload="metadata"></video>` : `<a class="btn" href="${esc(v.url)}" target="_blank" rel="noopener">▶ Watch online (this video is not in the pack)</a>`;
+      // the video inside the pack when this copy has it; otherwise the publisher's own player, streamed
+      const link = `<a class="btn" href="${esc(v.url)}" target="_blank" rel="noopener">▶ Watch on the publisher's site</a>`;
+      if (src) media = `<video class="ds-video" src="${src}" ${poster ? `poster="${poster}"` : ''} controls playsinline preload="metadata"></video>`;
+      else if (v.watch && navigator.onLine !== false) media = `<iframe class="ds-video" src="${esc(v.watch)}" title="${esc(v.label || 'Video')}" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe><p class="ds-stream muted small">Streaming from the publisher · <a href="${esc(v.url)}" target="_blank" rel="noopener">open in a new tab</a></p>`;
+      else if (v.watch) media = `<p class="muted">📴 This copy of the book streams its videos, so this one needs an internet connection.</p>`;
+      else media = link;
       media += `<p class="ds-vcap">${v.caption}</p>`;
     }
     const next = i < n - 1 ? `#/guide/${enc(key)}~${i + 1}` : '';
