@@ -183,20 +183,46 @@
 
   /* books on the server: the owner's on every device he logs into, other accounts' only those the owner made available (download once).
      A server copy that is hidden or withdrawn leaves the shelf; progress stays. A pack the user added by hand is never touched. */
+  /* a pack comes down piece by piece and is only accepted when every byte arrived */
+  async function fetchPack(sb) {
+    const parts = []; let next = 0;
+    const piece = async i => {
+      for (let t = 0; ; t++) {
+        try { return await (await api(`/books/${sb.id}/chunk/${i}`, { raw: true })).blob(); }
+        catch (e) { if (t >= 2) throw e; await new Promise(r => setTimeout(r, 800 * (t + 1))); }
+      }
+    };
+    const runner = async () => { while (next < sb.chunks) { const i = next++; parts[i] = await piece(i); } };
+    await Promise.all([runner(), runner(), runner()]);
+    const blob = new Blob(parts);
+    if (blob.size !== sb.size) throw new Error('Incomplete download.');
+    return blob;
+  }
   async function syncLibrary(force) {
     const { books } = await api('/books');
     const changed = [], listed = new Set(books.map(b => b.id));
     for (const b of Books.list()) if (b.rec && b.rec.server && b.rec.uid === acct.id && !listed.has(b.id)) { await Books.remove(b.id); changed.push(b.id); }
+    const xs = await Explain.source();
+    if (xs && xs.server && !books.some(b => b.meta.kind === 'explain')) { await Explain.remove(); changed.push('explain'); }      // access withdrawn
     for (const sb of books) {
+      if (sb.meta.kind === 'explain') {
+        if (!sb.visible) { if (xs && xs.server) { await Explain.remove(); changed.push(sb.id); } continue; }
+        if (xs && (!xs.server || (xs.updated >= sb.updated && xs.size === sb.size)) && !force) continue;       // a copy cut short by an earlier download is replaced
+        const wait = App.toast(`☁️ Downloading ${esc(sb.meta.short || sb.id)}…`, 60000);
+        try {
+          await Explain.load(new File([await fetchPack(sb)], sb.meta.file || 'greenberg.tspack'), { server: true, uid: acct.id, updated: sb.updated });
+          changed.push(sb.id);
+        } catch (e) { console.warn('Could not download the explanation pack', e); }
+        if (wait && wait.remove) wait.remove();
+        continue;
+      }
       const local = Books.get(sb.id);
       if (!sb.visible) { if (local && local.rec && local.rec.server) { await Books.remove(sb.id); changed.push(sb.id); } continue; }
-      if (local && local.rec && (!local.rec.server || local.rec.updated >= sb.updated) && !force) continue;
+      if (local && local.rec && (!local.rec.server || (local.rec.updated >= sb.updated && local.size === sb.size)) && !force) continue;
       if (local && !local.rec) continue;
       const busy = App.toast(`☁️ Downloading ${esc(sb.meta.short || sb.id)}…`, 60000);
       try {
-        const res = await api(`/books/${sb.id}/pack`, { raw: true });
-        const blob = await res.blob();
-        const file = new File([blob], sb.meta.file || (sb.id + '.tspack'));
+        const file = new File([await fetchPack(sb)], sb.meta.file || (sb.id + '.tspack'));
         const r = await Books.load(file, { server: true, uid: acct.id, updated: sb.updated });
         Store.indexBook(r.book); changed.push(sb.id);
       } catch (e) { console.warn('Could not download book', sb.id, e); }     // one failed book must not stop the others; retried next time
@@ -304,24 +330,42 @@
     });
   }
 
+  const bookLine = b => { const c = b.meta.counts || {}; return `${(b.size / 1048576).toFixed(1)} MB · ${b.meta.kind === 'explain' ? ((c.V || 0) + (c.R || 0) + (c.C || 0)).toLocaleString() + ' explanations' : c.q ? c.q.toLocaleString() + ' questions' : (c.steps || 0).toLocaleString() + ' steps'}`; };
+  /* owner: the books one account may receive */
+  async function userBooks(u, onDone) {
+    let books, grants;
+    try { books = (await api('/books')).books; grants = (await api('/admin/access')).grants; } catch (e) { App.toast('⚠️ ' + esc(e.message)); return; }
+    const has = new Set(grants.filter(g => g.user_id === u.id).map(g => g.book_id));
+    const m = App.modal(`<h3>📚 Books for ${esc(u.display)}</h3><p class="muted small">Switches apply the next time they open the app.</p>
+      <div class="ub-list">${books.map(b => `<label class="switch-row"><span>${esc(b.meta.icon || '📘')} <b>${esc(b.meta.short || b.id)}</b>${b.shared ? ' <small class="muted">· on for everyone</small>' : ''}</span><input type="checkbox" data-grant="${esc(b.id)}" ${b.shared || has.has(b.id) ? 'checked' : ''} ${b.shared ? 'disabled' : ''}><i class="switch"></i></label>`).join('') || '<p class="muted small">No books on the server yet.</p>'}</div>
+      <div class="row end mt"><button class="btn" id="ubDone">Done</button></div>`, { onClose: onDone });
+    $$('[data-grant]', m).forEach(i => i.onchange = async () => {
+      i.disabled = true;
+      try { await api('/admin/access', { body: { book: i.dataset.grant, user: u.id, on: i.checked } }); }
+      catch (e) { App.toast('⚠️ ' + esc(e.message)); i.checked = !i.checked; }
+      i.disabled = false;
+    });
+    $('#ubDone', m).onclick = () => m.close();
+  }
+
   /* owner: library card (visibility of each book on the server) */
   function libraryHTML() {
     if (!isOwner()) return '';
     return `<section class="card" id="libCard"><h2>☁️ Your private library</h2>
-      <p class="muted small"><b>My shelf</b> shows a book on your own devices. <b>Available to users</b> gives it to every other account the next time they open the app. Turning that off takes it back off their shelves; their progress is kept and returns if you turn it on again.</p>
+      <p class="muted small"><b>My shelf</b> shows a book on your own devices. <b>Everyone</b> gives it to every other account. To give books to particular people, open the <b>Owner panel</b> and press <b>📚 Books</b> on that account. Turning access off removes the book from that person's device the next time they open the app; their progress is kept.</p>
       <div id="libList" class="muted small">Loading…</div></section>`;
   }
   async function bindLibrary() {
     const el = $('#libList'); if (!el) return;
     try {
       const { books } = await api('/books');
-      const size = b => { const c = b.meta.counts || {}; return `${(b.size / 1048576).toFixed(1)} MB · ${c.q ? c.q.toLocaleString() + ' questions' : (c.steps || 0).toLocaleString() + ' steps'}`; };
+      const size = bookLine;
       el.innerHTML = books.map(b => `<div class="lib-book"><div>${esc(b.meta.icon || '📘')} <b>${esc(b.meta.short || b.id)}</b> <small class="muted">${size(b)}</small></div>
         <label class="switch-row"><span>My shelf</span><input type="checkbox" data-vis="${b.id}" ${b.visible ? 'checked' : ''}><i class="switch"></i></label>
-        <label class="switch-row"><span>Available to users</span><input type="checkbox" data-share="${b.id}" ${b.shared ? 'checked' : ''}><i class="switch"></i></label></div>`).join('') || 'No books on the server yet.';
+        <label class="switch-row"><span>Everyone</span><input type="checkbox" data-share="${b.id}" ${b.shared ? 'checked' : ''}><i class="switch"></i></label></div>`).join('') || 'No books on the server yet.';
       $$('[data-share]', el).forEach(i => i.onchange = async () => {
         i.disabled = true;
-        try { await api(`/books/${i.dataset.share}/shared`, { body: { shared: i.checked } }); App.toast(i.checked ? '📚 Available to your users' : '🔒 No longer available to your users'); }
+        try { await api(`/books/${i.dataset.share}/shared`, { body: { shared: i.checked } }); App.toast(i.checked ? '📚 Available to everyone' : '🔒 No longer available to everyone'); }
         catch (e) { App.toast('⚠️ ' + esc(e.message)); i.checked = !i.checked; }
         i.disabled = false;
       });
@@ -340,8 +384,10 @@
     if (!isOwner()) { v.innerHTML = '<p class="muted center">Owner only.</p>'; return; }
     v.innerHTML = `<a class="back" href="#/settings">‹ Settings</a><div class="page-head"><h1>🛡️ Owner panel</h1><p class="muted">Approve accounts, password-change requests and manage your study group.</p></div><div id="admList" class="muted">Loading…</div>`;
     const draw = async () => {
-      let users;
-      try { users = (await api('/admin/users')).users; } catch (e) { $('#admList').textContent = '⚠️ ' + e.message; return; }
+      let users, grants = [], all = [];
+      try { users = (await api('/admin/users')).users; [grants, all] = await Promise.all([api('/admin/access').then(r => r.grants), api('/books').then(r => r.books)]); } catch (e) { $('#admList').textContent = '⚠️ ' + e.message; return; }
+      const everyone = new Set(all.filter(b => b.shared).map(b => b.id));
+      const bookCount = u => new Set([...everyone, ...grants.filter(g => g.user_id === u.id && all.some(b => b.id === g.book_id)).map(g => g.book_id)]).size;
       const pend = users.filter(u => u.status === 'pending'), act = users.filter(u => u.status !== 'pending');
       $('#admList').innerHTML = `
         <section class="card"><h2>⏳ Waiting for approval <span class="pill">${pend.length}</span></h2>${pend.map(u => `
@@ -351,11 +397,13 @@
           <div class="list-item adm-user"><span class="grow"><b>${esc(u.display)}</b> ${u.role === 'owner' ? '<span class="pill gold">Owner</span>' : ''} ${u.status === 'rejected' ? '<span class="pill bad">rejected</span>' : ''}
             <br><small class="muted">@${esc(u.username)} · ${u.seen ? 'last seen ' + App.ago(u.seen) : 'never logged in'}${u.pwRequest ? ' · <b class="warn-t">asks to change password</b>' : u.pwAllowed ? ' · may change password' : ''}</small></span>
             ${u.role === 'owner' ? '' : `<span class="adm-btns">
+              ${u.status === 'rejected' ? '' : `<button class="btn ghost sm" data-books="${u.id}">📚 Books · ${bookCount(u)}</button>`}
               ${u.pwRequest ? `<button class="btn sm" data-a="allowpw" data-u="${u.id}">Allow password change</button>` : ''}
               ${u.status === 'rejected' ? `<button class="btn ghost sm" data-a="approve" data-u="${u.id}">Re-activate</button>` : `<button class="btn ghost sm" data-a="block" data-u="${u.id}">Block</button>`}
               <button class="btn ${u.examHost ? '' : 'ghost'} sm" data-a="${u.examHost ? 'nohost' : 'host'}" data-u="${u.id}" title="Host exam rooms on a big screen">${u.examHost ? '🖥️ Can host exams ✓' : '🖥️ Allow exam rooms'}</button>
               <button class="btn ghost sm" data-a="reset" data-u="${u.id}" data-n="${esc(u.username)}">Temp password</button>
               <button class="btn ghost sm danger-t" data-a="del" data-u="${u.id}" data-n="${esc(u.display)}">Delete</button></span>`}</div>`).join('')}</section>`;
+      $$('[data-books]').forEach(b => b.onclick = () => userBooks(users.find(u => String(u.id) === b.dataset.books), draw));
       $$('[data-a]').forEach(b => b.onclick = async () => {
         const id = b.dataset.u, a = b.dataset.a;
         try {

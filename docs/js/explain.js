@@ -2,7 +2,8 @@
    Pack format: "TSPACK01" + uint32 LE header length + JSON header {files:{name:[offset,length,type]}, ...} + data. */
 (function () {
   const DBN = 'topscore-pack', ST = 'kv', MAGIC = 'TSPACK01';
-  let dbp = null, blob = null, H = null, base = 0;
+  let dbp = null, blob = null, H = null, base = 0, srcRec = null;   // srcRec: where the stored pack came from
+  const myUid = () => { try { return (JSON.parse(localStorage.getItem('topscore.acct')) || {}).id || null; } catch (e) { return null; } };
   const chCache = {}, pgCache = {}, urls = {};
   const ready = init();
 
@@ -25,21 +26,24 @@
     h.base = 12 + n;
     return h;
   }
-  function use(b, h) { blob = b; H = h; base = h.base; for (const k in chCache) delete chCache[k]; for (const k in pgCache) delete pgCache[k]; for (const k in urls) { URL.revokeObjectURL(urls[k]); delete urls[k]; } }
+  function use(b, h) { blob = b; H = h; base = h ? h.base : 0; for (const k in chCache) delete chCache[k]; for (const k in pgCache) delete pgCache[k]; for (const k in urls) { URL.revokeObjectURL(urls[k]); delete urls[k]; } }
   async function init() {
-    try { const r = await op('readonly', s => s.get('pack')); if (r && r.blob && r.header) use(r.blob, r.header); } catch (e) { /* no pack */ }
+    try { const r = await op('readonly', s => s.get('pack')); if (r && r.blob && r.header) { srcRec = { server: !!r.server, uid: r.uid || null, updated: r.updated || 0, size: r.blob.size }; if (!r.server || r.uid === myUid()) use(r.blob, r.header); } } catch (e) { /* no pack */ }     // a copy from the server belongs to the account that received it
   }
-  async function load(file) {
+  async function load(file, opts = {}) {
     const h = await readHeader(file);
     if (!h.files || !h.files['index.json']) throw new Error('The pack is incomplete.');
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-    await op('readwrite', s => s.put({ blob: file, header: h, name: file.name, size: file.size, at: Date.now() }, 'pack'));
+    await op('readwrite', s => s.put({ blob: file, header: h, name: file.name, size: file.size, at: Date.now(), server: !!opts.server, uid: opts.uid || null, updated: opts.updated || 0 }, 'pack'));
+    srcRec = { server: !!opts.server, uid: opts.uid || null, updated: opts.updated || 0, size: file.size };
     // re-read from IndexedDB so we hold the stored copy, not the picked file
     const r = await op('readonly', s => s.get('pack'));
     use(r.blob, r.header);
     return info();
   }
-  async function remove() { await op('readwrite', s => s.delete('pack')); use(null, null); }
+  async function remove() { await op('readwrite', s => s.delete('pack')); srcRec = null; use(null, null); }
+  /* null unless this account has a copy: {server, uid, updated} */
+  async function source() { await ready; return srcRec && (!srcRec.server || srcRec.uid === myUid()) ? srcRec : null; }
   function info() { return H ? { title: H.title, built: H.built, counts: H.counts, size: blob.size, version: H.version } : null; }
   const has = () => !!H;
   function part(name, type) { const f = H.files[name]; if (!f) return null; return blob.slice(base + f[0], base + f[0] + f[1], type || f[2]); }
@@ -131,5 +135,5 @@
     wire(body);
   }
 
-  window.Explain = { ready, load, remove, info, has, forQ, mount, scan, reader, readHeader };
+  window.Explain = { source, ready, load, remove, info, has, forQ, mount, scan, reader, readHeader };
 })();
