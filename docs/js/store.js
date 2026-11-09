@@ -85,7 +85,7 @@
     return {
       v: 1, created: Date.now(),
       settings: { name: '', goal: 40, theme: 'auto', sound: true, haptics: true, recallFirst: false, shuffleOpts: false, examSecs: 72, fontScale: 1 },
-      cards: {}, log: [], daily: {}, xp: 0, ach: {}, flags: {}, skips: {}, sessions: [], best: {}, guide: {}, conf: {},
+      cards: {}, log: [], daily: {}, xp: 0, ach: {}, flags: {}, skips: {}, sessions: [], best: {}, guide: {}, conf: {}, hide: {},
       lastBackup: 0, sinceBackup: 0, backupNag: 0
     };
   }
@@ -248,6 +248,9 @@
   }
   // stars and skips: value > 0 = set at that time, < 0 = removed at that time (kept so removals sync between devices)
   const isFlagged = id => (S.flags[id] || 0) > 0;
+  /* books the user keeps off the main screen; stamped like stars so a change on one device reaches the others */
+  const isHidden = bid => ((S.hide || {})[bid] || 0) > 0;
+  function setHidden(bid, on) { S.hide = S.hide || {}; S.hide[bid] = on ? Date.now() : -Date.now(); save(); return on; }
   function isSkipped(id) { return ((S.skips || {})[id] || 0) > 0; }
   function toggleFlag(id) { const on = !isFlagged(id); S.flags[id] = on ? Date.now() : -Date.now(); save(); return on; }
   function setSkip(id, on) { S.skips = S.skips || {}; S.skips[id] = on ? Date.now() : -Date.now(); save(); return on; }
@@ -276,6 +279,7 @@
     Object.assign(S.ach, st.ach || {});
     S.flags = mergeStamp(S.flags, st.flags || {});
     S.skips = mergeStamp(S.skips || {}, st.skips || {});
+    S.hide = mergeStamp(S.hide || {}, st.hide || {});
     S.guide = S.guide || {};
     for (const k in st.guide || {}) {        // guided books: furthest step and finished flag survive, newest position wins
       const a = S.guide[k], b = st.guide[k];
@@ -325,7 +329,7 @@
 
   window.Store = {
     get S() { return S; }, set S(v) { S = v; },
-    started, resetProgress, Q, CH, ALL, BK, TIERS, RANKS, chKey, indexBook, unindexBook, syncBooks, keyed, isKeyed, answers, multi, allKeyed,
+    isHidden, setHidden, started, resetProgress, Q, CH, ALL, BK, TIERS, RANKS, chKey, indexBook, unindexBook, syncBooks, keyed, isKeyed, answers, multi, allKeyed,
     today, tier, statsOf, chapterStats, bookStats, globalTiers, dueIds, lastTouched, levelInfo, answer, rate, firstCorrect, earned, tally, XP_PER_Q,
     streak, bestStreak, session, setBest, toggleFlag, isFlagged, isSkipped, setSkip, toggleSkip, clearSkips, mergeState, exportData, importData, reset, save, day, storageBytes
   };

@@ -1058,6 +1058,22 @@ iframe.ds-video { border: 0; }
 .lib-name b { font-size: .92rem; }
 .lib-book .switch-row { padding: 0; border-bottom: 0; justify-content: center; }
 .lib-del { margin-left: auto; flex: none; background: none; border: 0; cursor: pointer; font-size: .95rem; padding: 4px; opacity: .65; }
+.shelf-acts { display: flex; gap: 12px; align-items: baseline; }
+.adm-filt { margin: 10px 0 4px; }
+.adm-row { border-bottom: 1px solid var(--line); }
+.adm-row:last-child { border-bottom: 0; }
+.adm-sum { display: flex; align-items: center; gap: 10px; padding: 10px 0; list-style: none; cursor: pointer; }
+.adm-owner .adm-sum { cursor: default; }
+.adm-sum::-webkit-details-marker { display: none; }
+.adm-av { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.adm-who { min-width: 0; }
+.adm-who b, .adm-who small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adm-tags { flex: none; display: flex; align-items: center; gap: 6px; }
+.adm-mini { font-size: .8rem; color: var(--ink2); white-space: nowrap; }
+details.adm-row[open] > summary .chev { transform: rotate(90deg); }
+.adm-body { padding: 0 0 12px 44px; }
+.adm-g { margin-top: 8px; }
+.adm-g .adm-btns { justify-content: flex-start; margin-top: 4px; }
 .um { margin: 12px 0; color: var(--ink); }
 .um-bar { height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--ink) 12%, transparent); overflow: hidden; margin: 5px 0 3px; }
 .um-bar i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }

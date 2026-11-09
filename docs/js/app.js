@@ -135,8 +135,13 @@
   function updateNavBook() { const a = $('.nav a[data-r="book"]'); if (a) { a.href = '#/book/' + bookId(); const s = $('small', a); if (s) s.textContent = book().short; } }
 
   // ---------- resume (session + chapter) ----------
+  /* a saved session of a book the user keeps off the main screen stays off it too */
+  function resumeHidden(r) {
+    const k = r.cfg && r.cfg.chapters && r.cfg.chapters[0], bid = (r.cfg && r.cfg.bid) || (k && CH[k] && CH[k].bid) || (r.n !== undefined && CH[r.n] && CH[r.n].bid);
+    return !!bid && Store.isHidden(bid);
+  }
   function resumeCard() {
-    const r = window.Modes && Modes.resume.get(); if (!r) return '';
+    const r = window.Modes && Modes.resume.get(); if (!r || resumeHidden(r)) return '';
     return `<section class="card resume-card pop-in"><div class="rc-ic">▶️</div><div class="grow"><div class="eyebrow">Continue where you left off</div><b>${esc(r.label)}</b><div class="muted small">${esc(r.prog || '')} · ${ago(r.ts)}</div></div>
       <div class="rc-btns"><button class="btn" data-resume>Resume</button><button class="icon-btn" data-resume-x aria-label="Discard saved session">✕</button></div></section>`;
   }
@@ -171,14 +176,14 @@
     return '';
   }
   function chapterResumeList(bid, max = 4) {
-    const all = Modes.resume.chapters().filter(x => CH[x.key] && (!bid || CH[x.key].bid === bid)).sort((a, b) => b.s.ts - a.s.ts).slice(0, max);
+    const all = Modes.resume.chapters().filter(x => CH[x.key] && (bid ? CH[x.key].bid === bid : !Store.isHidden(CH[x.key].bid))).sort((a, b) => b.s.ts - a.s.ts).slice(0, max);
     if (!all.length) return '';
     return `<section class="card"><h2>📍 Chapters in progress</h2>${all.map(({ key, s }) => `
       <div class="list-item"><span class="grow"><b>${chTitle(key)}</b><br><small class="muted">${esc(s.label.split(' · ')[0])} · ${esc(s.prog || '')} · ${ago(s.ts)}</small></span>
       <button class="btn sm" data-chres="${esc(key)}">Continue</button><button class="icon-btn" data-chres-x="${esc(key)}" aria-label="Forget">✕</button></div>`).join('')}</section>`;
   }
   function resumePrompt() {
-    const r = Modes.resume.get(); if (!r || location.hash.startsWith('#/play')) return;
+    const r = Modes.resume.get(); if (!r || location.hash.startsWith('#/play') || resumeHidden(r)) return;
     const m = modal(`<div class="center"><div class="intro-logo">▶️</div><h3>Resume your last session?</h3>
       <p><b>${esc(r.label)}</b></p><p class="muted small">${esc(r.prog || '')} · saved ${ago(r.ts)}</p>
       <div class="row gap center-row wrap"><button class="btn ghost" id="rsLater">Not now</button><button class="btn" id="rsGo">▶️ Resume</button></div>
@@ -206,6 +211,8 @@
     const greet = hr < 5 ? 'Burning the midnight oil' : hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
     const books = Books.list();
     const totalQ = books.reduce((a, b) => a + Store.bookStats(b.id).total, 0);
+    const shelf = books.filter(x => !Store.isHidden(x.id));
+    if (shelf.length && Store.isHidden(bookId())) Books.setCurrent(shelf[0].id);
     const b = book(), bs = Store.bookStats(b.id), due = bs.due;
     view().innerHTML = `
       ${backupBanner()}
@@ -230,8 +237,9 @@
       </section>
 
       <section class="shelf-wrap">
-        <div class="row between"><h2>📚 Bookshelf</h2><button class="link-btn" id="addBook">＋ Add book</button></div>
-        <div class="shelf">${books.map(bookTile).join('')}
+        <div class="row between"><h2>📚 Bookshelf</h2><div class="shelf-acts"><button class="link-btn" id="pickShelf">👁 Show or hide</button><button class="link-btn" id="addBook">＋ Add book</button></div></div>
+        ${shelf.length ? '' : '<p class="muted small">All your books are hidden. Press <b>Show or hide</b> to bring them back.</p>'}
+        <div class="shelf">${shelf.map(bookTile).join('')}
           <button class="book-tile add" id="addBook2"><div class="cover"><span class="b-ic">＋</span><b class="b-t">Add a book</b><small class="b-a">Load a private .tspack file</small></div></button>
         </div>
         <div class="shelf-board"></div>
@@ -267,8 +275,17 @@
     $$('[data-go]').forEach(x => x.onclick = () => Modes.setup(x.dataset.go));
     $$('[data-game]').forEach(x => x.onclick = () => Modes.setup(x.dataset.game));
     $('#addBook').onclick = $('#addBook2').onclick = addPack;
+    $('#pickShelf').onclick = pickShelf;
     bindBanner();
   };
+  /* choose which books appear on the main screen; a hidden book stays on the device with its progress */
+  function pickShelf() {
+    const m = modal(`<h3>👁 Books on your main screen</h3><p class="muted small">A hidden book stays on this device and keeps your progress. You can still reach it from Search and the Study pages.</p>
+      <div class="ub-list">${Books.list().map(b => `<label class="switch-row"><span>${b.icon || '📘'} <b>${esc(b.short)}</b></span><input type="checkbox" data-show="${esc(b.id)}" ${Store.isHidden(b.id) ? '' : 'checked'}><i class="switch"></i></label>`).join('')}</div>
+      <div class="row end mt"><button class="btn" id="pickDone">Done</button></div>`, { onClose: () => { if (location.hash === '' || location.hash === '#/') render(); } });
+    $$('[data-show]', m).forEach(i => i.onchange = () => Store.setHidden(i.dataset.show, !i.checked));
+    $('#pickDone', m).onclick = () => m.close();
+  }
   function acc7() {
     let a = 0, c = 0; const now = Date.now();
     for (let i = 0; i < 7; i++) { const d = S().daily[Store.today(now - i * 86400000)]; if (d) { a += d.a; c += d.c; } }

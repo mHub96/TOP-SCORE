@@ -67,7 +67,7 @@
 
   /* fingerprint of what actually matters, so housekeeping saves do not cost a server write */
   function sigOf() {
-    const S = Store.S, t = JSON.stringify([S.cards, S.conf, S.guide, S.flags, S.skips, S.best, S.ach, S.settings]);
+    const S = Store.S, t = JSON.stringify([S.cards, S.conf, S.guide, S.flags, S.skips, S.hide, S.best, S.ach, S.settings]);
     let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
     return h + ':' + t.length;
   }

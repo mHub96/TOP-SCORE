@@ -445,26 +445,59 @@
     if (!isOwner()) { v.innerHTML = '<p class="muted center">Owner only.</p>'; return; }
     v.innerHTML = `<a class="back" href="#/settings">‹ Settings</a><div class="page-head"><h1>🛡️ Owner panel</h1><p class="muted">Approve accounts, password-change requests and manage your study group.</p></div><details class="card" id="useCard"><summary><b>📈 Website usage</b> <small class="muted">free plan limits</small></summary><div id="useBody" class="muted small">Loading…</div></details><div id="admList" class="muted">Loading…</div>`;
     $('#useCard').ontoggle = () => { if ($('#useCard').open) drawUsage(); };
+    const admUi = { find: '', filt: 'all', open: null };       // search, filter and open row survive each refresh
     const draw = async () => {
       let users, grants = [], all = [];
       try { users = (await api('/admin/users')).users; [grants, all] = await Promise.all([api('/admin/access').then(r => r.grants), api('/books').then(r => r.books)]); } catch (e) { $('#admList').textContent = '⚠️ ' + e.message; return; }
       const everyone = new Set(all.filter(b => b.shared).map(b => b.id));
       const bookCount = u => new Set([...everyone, ...grants.filter(g => g.user_id === u.id && all.some(b => b.id === g.book_id)).map(g => g.book_id)]).size;
       const pend = users.filter(u => u.status === 'pending'), act = users.filter(u => u.status !== 'pending');
+      const needs = u => !!u.pwRequest;
+      const blocked = u => u.status === 'rejected';
+      const seen = u => u.seen ? 'last seen ' + App.ago(u.seen) : 'never logged in';
+      act.sort((x, y) => (y.role === 'owner') - (x.role === 'owner') || needs(y) - needs(x) || String(x.display).localeCompare(String(y.display)));
+      const counts = { all: act.length, active: act.filter(u => !blocked(u)).length, action: act.filter(needs).length, host: act.filter(u => u.examHost).length, blocked: act.filter(blocked).length };
+      const FILTERS = [['all', 'All'], ['active', 'Active'], ['action', 'Needs action'], ['host', 'Exam hosts'], ['blocked', 'Blocked']];
+      const rowHead = u => `<span class="adm-av">${esc(String(u.display || '?').charAt(0).toUpperCase())}</span><span class="grow adm-who"><b>${esc(u.display)}</b><small class="muted">@${esc(u.username)} · ${seen(u)}</small></span><span class="adm-tags">${u.role === 'owner' ? '<span class="pill">Owner</span>' : ''}${needs(u) ? '<span class="pill warn">⚠️ Password</span>' : ''}${blocked(u) ? '<span class="pill bad">Blocked</span>' : ''}${u.examHost ? '<span class="adm-mini" title="Can host exams">🖥️</span>' : ''}${u.role === 'owner' || blocked(u) ? '' : `<span class="adm-mini" title="Books">📚 ${bookCount(u)}</span>`}</span>`;
+      const tags = u => ['all', blocked(u) ? 'blocked' : 'active', needs(u) ? 'action' : '', u.examHost ? 'host' : ''].filter(Boolean).join(' ');
       $('#admList').innerHTML = `
-        <section class="card"><h2>⏳ Waiting for approval <span class="pill">${pend.length}</span></h2>${pend.map(u => `
+        ${pend.length ? `<section class="card"><h2>⏳ Waiting for approval <span class="pill">${pend.length}</span></h2>${pend.map(u => `
           <div class="list-item"><span class="grow"><b>${esc(u.display)}</b> <small class="muted">@${esc(u.username)} · asked ${new Date(u.created).toLocaleString()}</small></span>
-          <button class="btn sm" data-a="approve" data-u="${u.id}">Approve</button><button class="btn ghost sm" data-a="reject" data-u="${u.id}">Reject</button></div>`).join('') || '<p class="muted small">No one is waiting.</p>'}</section>
-        <section class="card"><h2>👥 Accounts</h2>${act.map(u => `
-          <div class="list-item adm-user"><span class="grow"><b>${esc(u.display)}</b> ${u.role === 'owner' ? '<span class="pill gold">Owner</span>' : ''} ${u.status === 'rejected' ? '<span class="pill bad">rejected</span>' : ''}
-            <br><small class="muted">@${esc(u.username)} · ${u.seen ? 'last seen ' + App.ago(u.seen) : 'never logged in'}${u.pwRequest ? ' · <b class="warn-t">asks to change password</b>' : u.pwAllowed ? ' · may change password' : ''}</small></span>
-            ${u.role === 'owner' ? '' : `<span class="adm-btns">
-              ${u.status === 'rejected' ? '' : `<button class="btn ghost sm" data-books="${u.id}">📚 Books · ${bookCount(u)}</button>`}
-              ${u.pwRequest ? `<button class="btn sm" data-a="allowpw" data-u="${u.id}">Allow password change</button>` : ''}
-              ${u.status === 'rejected' ? `<button class="btn ghost sm" data-a="approve" data-u="${u.id}">Re-activate</button>` : `<button class="btn ghost sm" data-a="block" data-u="${u.id}">Block</button>`}
-              <button class="btn ${u.examHost ? '' : 'ghost'} sm" data-a="${u.examHost ? 'nohost' : 'host'}" data-u="${u.id}" title="Host exam rooms on a big screen">${u.examHost ? '🖥️ Can host exams ✓' : '🖥️ Allow exam rooms'}</button>
-              <button class="btn ghost sm" data-a="reset" data-u="${u.id}" data-n="${esc(u.username)}">Temp password</button>
-              <button class="btn ghost sm danger-t" data-a="del" data-u="${u.id}" data-n="${esc(u.display)}">Delete</button></span>`}</div>`).join('')}</section>`;
+          <button class="btn sm" data-a="approve" data-u="${u.id}">Approve</button><button class="btn ghost sm" data-a="reject" data-u="${u.id}">Reject</button></div>`).join('')}</section>` : ''}
+        <section class="card"><div class="row between"><h2>👥 Accounts</h2><small class="muted" id="admCount"></small></div>
+          <input class="search" id="admFind" type="search" placeholder="Search by name or username…" autocomplete="off" value="${esc(admUi.find)}">
+          <div class="book-switch adm-filt" id="admFilt">${FILTERS.map(([k, t]) => `<button class="chip ${admUi.filt === k ? 'on' : ''}" data-f="${k}">${t} · ${counts[k]}</button>`).join('')}</div>
+          <div id="admUsers">${act.map(u => u.role === 'owner'
+            ? `<div class="adm-row adm-owner" data-s="${esc((u.display + ' ' + u.username).toLowerCase())}" data-t="${tags(u)}"><div class="adm-sum">${rowHead(u)}</div></div>`
+            : `<details class="adm-row" data-id="${u.id}" data-s="${esc((u.display + ' ' + u.username).toLowerCase())}" data-t="${tags(u)}" ${admUi.open === u.id ? 'open' : ''}><summary class="adm-sum">${rowHead(u)}<span class="chev">›</span></summary>
+              <div class="adm-body">
+                ${u.pwAllowed && !u.pwRequest ? '<p class="muted small">May change their password.</p>' : ''}
+                <div class="adm-g"><small class="muted">Access</small><div class="adm-btns">
+                  ${blocked(u) ? '' : `<button class="btn ghost sm" data-books="${u.id}">📚 Books · ${bookCount(u)}</button>`}
+                  <button class="btn ${u.examHost ? '' : 'ghost'} sm" data-a="${u.examHost ? 'nohost' : 'host'}" data-u="${u.id}" title="Host exam rooms on a big screen">${u.examHost ? '🖥️ Can host exams ✓' : '🖥️ Allow exam rooms'}</button>
+                </div></div>
+                <div class="adm-g"><small class="muted">Account</small><div class="adm-btns">
+                  ${u.pwRequest ? `<button class="btn sm" data-a="allowpw" data-u="${u.id}">Allow password change</button>` : ''}
+                  <button class="btn ghost sm" data-a="reset" data-u="${u.id}" data-n="${esc(u.username)}">Temp password</button>
+                  ${blocked(u) ? `<button class="btn ghost sm" data-a="approve" data-u="${u.id}">Re-activate</button>` : `<button class="btn ghost sm" data-a="block" data-u="${u.id}">Block</button>`}
+                  <button class="btn ghost sm danger-t" data-a="del" data-u="${u.id}" data-n="${esc(u.display)}">Delete</button>
+                </div></div>
+              </div></details>`).join('')}</div>
+          <p class="muted small center" id="admNone" hidden>No accounts match.</p></section>`;
+      const applyFilter = () => {
+        const terms = admUi.find.toLowerCase().split(/\s+/).filter(Boolean), rows = $$('#admUsers .adm-row');
+        let n = 0;
+        rows.forEach(r => { const on = r.dataset.t.split(' ').includes(admUi.filt) && terms.every(t => r.dataset.s.includes(t)); r.style.display = on ? '' : 'none'; if (on) n++; });
+        $('#admCount').textContent = `${n} of ${rows.length}`;
+        $('#admNone').hidden = n > 0;
+      };
+      $('#admFind').oninput = e => { admUi.find = e.target.value; applyFilter(); };
+      $$('#admFilt [data-f]').forEach(c => c.onclick = () => { admUi.filt = c.dataset.f; $$('#admFilt [data-f]').forEach(x => x.classList.toggle('on', x === c)); applyFilter(); });
+      $$('#admUsers details.adm-row').forEach(d => d.ontoggle = () => {
+        if (d.open) { admUi.open = +d.dataset.id; $$('#admUsers details.adm-row[open]').forEach(x => { if (x !== d) x.open = false; }); }
+        else if (admUi.open === +d.dataset.id) admUi.open = null;
+      });
+      applyFilter();
       $$('[data-books]').forEach(b => b.onclick = () => userBooks(users.find(u => String(u.id) === b.dataset.books), draw));
       $$('[data-a]').forEach(b => b.onclick = async () => {
         const id = b.dataset.u, a = b.dataset.a;
