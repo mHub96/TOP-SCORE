@@ -5,7 +5,7 @@
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const strip = s => String(s).replace(/<[^>]+>/g, '');
   const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[a[i], a[j]] = [a[j], a[i]]; } return a; };
-  const L = i => 'ABCDEFGHIJKL'[i];
+  const L = i => i < 26 ? String.fromCharCode(65 + i) : 'A' + String.fromCharCode(39 + i);   // A-Z, then AA, AB...
   const { Q, CH } = Store;
   const S = () => Store.S;
   const view = () => $('#view');
