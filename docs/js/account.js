@@ -160,11 +160,12 @@
     try {
       const r = await api('/me');
       saveAcct(Object.assign({}, acct, r.user));
-      await api('/me', { body: { books: Books.list().map(b => b.id) } });
+      const shelf = Books.list().map(b => b.id).sort().join();     // only tell the server when the shelf changed
+      if (localStorage.getItem('topscore.shelf.' + acct.id) !== shelf) { await api('/me', { body: { books: Books.list().map(b => b.id) } }); localStorage.setItem('topscore.shelf.' + acct.id, shelf); }
     } catch (e) { /* offline: keep working locally */ }
     syncLibrary().catch(() => { });
     let libAt = Date.now();                    // a book made available while the app stays open arrives on the next return to it
-    document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - libAt > 600000) { libAt = Date.now(); syncLibrary().catch(() => { }); } });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - libAt > 1800000) { libAt = Date.now(); syncLibrary().catch(() => { }); } });
     Push.token(acct && acct.token); Push.refresh();
     setTimeout(() => Push.state().then(st => {
       if ((st === 'off' || st === 'install') && !localStorage.getItem('ts.pushAsk') && !document.body.classList.contains('exam-locked') && !document.body.classList.contains('playing') && !document.body.classList.contains('exam-mode')) {
@@ -177,8 +178,9 @@
       if (d.type === 'push') { (d.items || []).forEach(it => notify(it.title, it.body, it.url || '#/arena', true)); pollInbox(); }
       if (d.type === 'open' && d.url) location.hash = d.url;
     });
-    pollInbox(); inboxT = setInterval(() => { if (!document.hidden) pollInbox(); }, 20000);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) pollInbox(); });
+    pollInbox(); inboxT = setInterval(() => { if (!document.hidden) pollInbox(); }, 90000);        // live challenges arrive by push; this is the fallback
+    let inboxBack = 0;
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - inboxBack > 45000) { inboxBack = Date.now(); pollInbox(); } });
   }
 
   /* books on the server: the owner's on every device he logs into, other accounts' only those the owner made available (download once).
@@ -189,11 +191,11 @@
     const piece = async i => {
       for (let t = 0; ; t++) {
         try { return await (await api(`/books/${sb.id}/chunk/${i}`, { raw: true })).blob(); }
-        catch (e) { if (t >= 2) throw e; await new Promise(r => setTimeout(r, 800 * (t + 1))); }
+        catch (e) { if (t >= 5) throw e; await new Promise(r => setTimeout(r, 1000 * Math.pow(2, t))); }       // the database can briefly report that it is overloaded
       }
     };
     const runner = async () => { while (next < sb.chunks) { const i = next++; parts[i] = await piece(i); } };
-    await Promise.all([runner(), runner(), runner()]);
+    await Promise.all([runner(), runner()]);
     const blob = new Blob(parts);
     if (blob.size !== sb.size) throw new Error('Incomplete download.');
     return blob;
@@ -353,18 +355,53 @@
     if (!isOwner()) return '';
     return `<details class="card lib-card" id="libCard"><summary><b>☁️ Your private library</b> <small class="muted" id="libSum"></small></summary>
       <p class="muted small"><b>My shelf</b> shows a book on your own devices. <b>Everyone</b> gives it to every other account. To give books to particular people, open the <b>Owner panel</b> and press <b>📚 Books</b> on that account. Turning access off removes the book from that person's device the next time they open the app; their progress is kept.</p>
-      <div id="libList" class="muted small">Loading…</div></details>`;
+      <div id="libList" class="muted small">Loading…</div>
+      <div class="row gap wrap mt"><button class="btn ghost sm" id="libUp">＋ Upload a book</button><input type="file" id="libFile" hidden></div>
+      <div id="libNote" class="muted small"></div></details>`;
+  }
+  /* owner: send a pack file to the server in 1 MB pieces */
+  async function uploadPack(file, note) {
+    if (file.size > 200 * 1048576) throw new Error('This file is too large for the server library (limit 200 MB). Packs with videos stay on the device: use ＋ on the shelf.');
+    const h = await Books.readHeader(file);
+    const book = h.book || (h.files && h.files['index.json'] ? { id: 'greenberg', title: h.title || 'Greenberg explanations', short: 'Greenberg explanations', authors: "Greenberg's Handbook of Neurosurgery", color: '#b45309', icon: '📖', order: 0 } : null);
+    if (!book || !/^[a-z0-9_-]+$/.test(book.id || '') || book.id === 'ts') throw new Error('This file is not a book pack that can be uploaded.');
+    const meta = { id: book.id, title: book.title, short: book.short, authors: book.authors, year: book.year, color: book.color, icon: book.icon, order: book.order, counts: h.counts, built: h.built, file: file.name };
+    if (!h.book) meta.kind = 'explain';
+    const C = 1000000, n = Math.ceil(file.size / C);
+    for (let i = 0; i < n; i++) {
+      for (let t = 0; ; t++) {
+        try { await api(`/books/${book.id}/upload/${i}/${n}${i ? '' : '?meta=' + encodeURIComponent(JSON.stringify(meta))}`, { method: 'PUT', body: file.slice(i * C, (i + 1) * C) }); break; }
+        catch (e) { if (t >= 2 || /room|Owner/.test(e.message)) throw e; await new Promise(r => setTimeout(r, 1000 * (t + 1))); }
+      }
+      note(`Uploading ${esc(meta.short || meta.id)}… ${Math.round((i + 1) / n * 100)}%`);
+    }
+    return meta;
   }
   async function bindLibrary() {
     const el = $('#libList'); if (!el) return;
+    const up = $('#libUp'), inp = $('#libFile'), note = $('#libNote');
+    if (up && !up.dataset.on) {
+      up.dataset.on = 1; up.onclick = () => inp.click();
+      inp.onchange = async () => {
+        const f = inp.files[0]; inp.value = ''; if (!f) return;
+        up.disabled = true; note.textContent = 'Checking the file…';
+        try { const m = await uploadPack(f, t => note.innerHTML = t); note.textContent = `✅ ${m.short || m.id} uploaded. It is off for other users until you choose who gets it.`; await bindLibrary(); await syncLibrary(); }
+        catch (e) { note.textContent = '⚠️ ' + e.message; }
+        up.disabled = false;
+      };
+    }
     try {
       const { books } = await api('/books');
       const size = bookLine;
-      el.innerHTML = books.length ? `<div class="lib-book lib-head"><span></span><span>My shelf</span><span>Everyone</span></div>` + books.map(b => `<div class="lib-book"><div class="lib-name"><span>${esc(b.meta.icon || '📘')}</span><div><b>${esc(b.meta.short || b.id)}</b><small class="muted">${size(b)}</small></div></div>
+      el.innerHTML = books.length ? `<div class="lib-book lib-head"><span></span><span>My shelf</span><span>Everyone</span></div>` + books.map(b => `<div class="lib-book"><div class="lib-name"><span>${esc(b.meta.icon || '📘')}</span><div><b>${esc(b.meta.short || b.id)}</b><small class="muted">${size(b)}</small></div><button class="lib-del" data-del="${b.id}" data-n="${esc(b.meta.short || b.id)}" aria-label="Remove ${esc(b.meta.short || b.id)} from the server">🗑</button></div>
         <label class="switch-row" aria-label="My shelf"><input type="checkbox" data-vis="${b.id}" ${b.visible ? 'checked' : ''}><i class="switch"></i></label>
         <label class="switch-row" aria-label="Everyone"><input type="checkbox" data-share="${b.id}" ${b.shared ? 'checked' : ''}><i class="switch"></i></label></div>`).join('') : 'No books on the server yet.';
       const sum = () => { $('#libSum').textContent = `· ${books.length} book${books.length === 1 ? '' : 's'}, ${$$('[data-share]:checked', el).length} for everyone`; };
       sum(); el.addEventListener('change', sum);
+      $$('[data-del]', el).forEach(b => b.onclick = async () => {
+        if (!await App.confirmBox(`Remove ${esc(b.dataset.n)} from the server?`, 'It is deleted from the server and from the phones it was sent to. Progress in it is kept. You can upload it again later.', 'Remove')) return;
+        try { await api('/books/' + b.dataset.del, { method: 'DELETE' }); await syncLibrary(); App.toast('🗑 Removed'); bindLibrary(); } catch (e) { App.toast('⚠️ ' + esc(e.message)); }
+      });
       $$('[data-share]', el).forEach(i => i.onchange = async () => {
         i.disabled = true;
         try { await api(`/books/${i.dataset.share}/shared`, { body: { shared: i.checked } }); App.toast(i.checked ? '📚 Available to everyone' : '🔒 No longer available to everyone'); }
@@ -380,11 +417,34 @@
     } catch (e) { el.textContent = '⚠️ ' + e.message; }
   }
 
+  // ---------- owner: free-plan usage (fetched only when the card is opened) ----------
+  const fmtN = n => Math.round(n).toLocaleString();
+  const fmtB = b => b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(1) + ' MB';
+  function meter(label, used, limit, fmt, sub) {
+    const p = limit ? used / limit : 0, w = Math.min(100, p * 100), level = p >= .9 ? 'bad' : p >= .7 ? 'warn' : '';
+    const flag = level === 'bad' ? ' · ⚠️ nearly used up' : level === 'warn' ? ' · ⚠️ getting high' : '';
+    return `<div class="um"><div class="row between"><b>${label}</b><span class="small">${fmt(used)} of ${fmt(limit)}</span></div><div class="um-bar ${level}" role="img" aria-label="${w.toFixed(1)} percent used"><i style="width:${used > 0 ? Math.max(w, 1) : 0}%"></i></div><div class="muted small">${fmt(Math.max(0, limit - used))} left · ${(p * 100).toFixed(p < .1 ? 2 : 1)}% used${flag}${sub ? ' · ' + sub : ''}</div></div>`;
+  }
+  async function drawUsage() {
+    const el = $('#useBody'); if (!el) return;
+    let u; try { u = await api('/admin/usage'); } catch (e) { el.textContent = '⚠️ ' + e.message; return; }
+    const L = u.limits, T = u.today, total = u.dbs.reduce((a, d) => a + d.bytes, 0), site = u.dbs.find(d => d.name === u.site) || { bytes: 0 };
+    const reset = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1)) - Date.now(), h = Math.floor(reset / 3600000), m = Math.floor(reset / 60000) % 60;
+    el.innerHTML = `<p class="muted small">Today (UTC). Daily limits reset in ${h} h ${m} min. Limits are shared by your whole Cloudflare account, including the test server.</p>
+      ${meter('Requests today', T.requests, L.requests, fmtN)}${meter('Database reads today (rows)', T.rowsRead, L.rowsRead, fmtN)}${meter('Database writes today (rows)', T.rowsWritten, L.rowsWritten, fmtN)}
+      ${meter('This database', site.bytes, L.dbBytes, fmtB, `${u.packs.n} books, ${fmtB(u.packs.bytes)}`)}${meter('All databases', total, L.acctBytes, fmtB)}
+      ${u.cpu ? `<div class="um"><div class="row between"><b>Processing time per request</b><span class="small">limit ${L.cpuMs} ms</span></div><div class="muted small">Typical ${u.cpu.p50.toFixed(1)} ms · slowest 1% ${u.cpu.p99.toFixed(1)} ms</div></div>` : ''}
+      <div class="tw"><table class="grid um-t"><tr><th>Day</th><th>Requests</th><th>Reads</th><th>Writes</th></tr>${u.days.map(d => `<tr><td>${d.date.slice(5)}</td><td>${fmtN(d.requests)}</td><td>${fmtN(d.rowsRead)}</td><td>${fmtN(d.rowsWritten)}</td></tr>`).join('')}</table></div>
+      <div class="row between mt"><span class="muted small">Cloudflare's figures can lag by a minute or two.</span><button class="btn ghost sm" id="useAgain">↻ Refresh</button></div>`;
+    $('#useAgain').onclick = drawUsage;
+  }
+
   // ---------- owner panel ----------
   App.routes.admin = async () => {
     const v = $('#view');
     if (!isOwner()) { v.innerHTML = '<p class="muted center">Owner only.</p>'; return; }
-    v.innerHTML = `<a class="back" href="#/settings">‹ Settings</a><div class="page-head"><h1>🛡️ Owner panel</h1><p class="muted">Approve accounts, password-change requests and manage your study group.</p></div><div id="admList" class="muted">Loading…</div>`;
+    v.innerHTML = `<a class="back" href="#/settings">‹ Settings</a><div class="page-head"><h1>🛡️ Owner panel</h1><p class="muted">Approve accounts, password-change requests and manage your study group.</p></div><details class="card" id="useCard"><summary><b>📈 Website usage</b> <small class="muted">free plan limits</small></summary><div id="useBody" class="muted small">Loading…</div></details><div id="admList" class="muted">Loading…</div>`;
+    $('#useCard').ontoggle = () => { if ($('#useCard').open) drawUsage(); };
     const draw = async () => {
       let users, grants = [], all = [];
       try { users = (await api('/admin/users')).users; [grants, all] = await Promise.all([api('/admin/access').then(r => r.grants), api('/books').then(r => r.books)]); } catch (e) { $('#admList').textContent = '⚠️ ' + e.message; return; }
@@ -438,6 +498,7 @@
   };
   const lbTabs = () => Object.keys(METRICS).filter(k => lbPeriod === 'all' || k !== 'streak');   // a streak has no weekly figure
   App.routes.arena = async (arg) => {
+    pollInbox();                               // the Arena is where challenges matter: always fresh here
     const v = $('#view'), tab = ['challenges', 'exam'].includes(arg) ? arg : 'leaders';
     v.innerHTML = `<div class="page-head"><h1>⚔️ Arena</h1><div class="seg" id="arTab"><button data-t="leaders" class="${tab === 'leaders' ? 'on' : ''}">🏆 Leaderboard</button><button data-t="challenges" class="${tab === 'challenges' ? 'on' : ''}">⚔️ Challenges</button><button data-t="exam" class="${tab === 'exam' ? 'on' : ''}">🖥️ Exam room</button></div></div><div id="arBody" class="muted">Loading…</div>`;
     $$('#arTab button').forEach(b => b.onclick = () => App.go('#/arena/' + b.dataset.t));

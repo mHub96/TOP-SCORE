@@ -65,6 +65,12 @@
     absorbing = false;
   }
 
+  /* fingerprint of what actually matters, so housekeeping saves do not cost a server write */
+  function sigOf() {
+    const S = Store.S, t = JSON.stringify([S.cards, S.conf, S.guide, S.flags, S.skips, S.best, S.ach, S.settings]);
+    let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
+    return h + ':' + t.length;
+  }
   async function sync(why = '') {
     if (!window.Account || !Account.me()) return false;
     if (!navigator.onLine) { lastErr = 'Offline — will sync when you are back online'; keep(); return false; }
@@ -72,15 +78,24 @@
     busy = (async () => {
       st.state = 'syncing'; keep();
       try {
-        const g = await Account.api('/progress');
-        if (!g.data) st.rev = 0;
-        else if (g.rev !== st.rev) { absorb(await decode(g.data)); st.rev = g.rev; }
+        const g = await Account.api('/progress' + (st.rev ? '?rev=' + st.rev : ''));
+        let merged = false;
+        if (g.same) { /* nothing new on the server */ }
+        else if (!g.data) st.rev = 0;
+        else if (g.rev !== st.rev) { absorb(await decode(g.data)); st.rev = g.rev; merged = true; }
+        const today = new Date().toISOString().slice(0, 10);
+        const sig = sigOf();
+        if ((!st.dirty || sig === st.sig) && st.rev && st.putDay === today) {        // nothing to save: no write; the Arena summary still refreshes once a day
+          st.dirty = false; st.sig = sig; st.at = Date.now(); st.state = 'ok'; lastErr = ''; keep();
+          if (merged && why === 'start' && window.App && /^#\/?$|^#\/book|^#\/stats|^#\/ch|^$/.test(location.hash)) App.render();
+          return true;
+        }
         for (let attempt = 0; attempt < 3; attempt++) {
           const p = await Account.api('/progress', { method: 'PUT', body: { baseRev: st.rev || 0, data: await encode(snapshot()), stats: stats() } });
           if (p.conflict) { if (p.data) absorb(await decode(p.data)); st.rev = p.rev; continue; }
           st.rev = p.rev; break;
         }
-        st.at = Date.now(); st.dirty = false; st.state = 'ok'; lastErr = '';
+        st.at = Date.now(); st.dirty = false; st.state = 'ok'; lastErr = ''; st.putDay = today; st.sig = sigOf();
         keep();
         if (why === 'start' && window.App && /^#\/?$|^#\/book|^#\/stats|^#\/ch|^$/.test(location.hash)) App.render();
         return true;
@@ -91,15 +106,15 @@
     })();
     return busy;
   }
-  function schedule(ms = 12000) { st.dirty = true; clearTimeout(timer); timer = setTimeout(() => sync('change'), ms); }
+  function schedule(ms = 30000) { st.dirty = true; clearTimeout(timer); timer = setTimeout(() => sync('change'), ms); }
   function info() { return { at: st.at || 0, state: st.state || 'idle', error: lastErr, dirty: !!st.dirty }; }
   function start() {
     load();
     window.__onSave = () => { if (!absorbing) schedule(); };
     sync('start');
-    document.addEventListener('visibilitychange', () => { if (document.hidden) { if (st.dirty) sync('hide'); } else sync('show'); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { if (st.dirty) sync('hide'); } else if (Date.now() - (st.at || 0) > 120000) sync('show'); });
     addEventListener('online', () => sync('online'));
-    setInterval(() => { if (!document.hidden) sync('tick'); }, 4 * 60000);
+    setInterval(() => { if (!document.hidden) sync('tick'); }, 15 * 60000);
   }
   window.Sync = { start, sync, info, onChange: f => listeners.push(f), stats };
 })();
