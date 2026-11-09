@@ -162,7 +162,9 @@
       saveAcct(Object.assign({}, acct, r.user));
       await api('/me', { body: { books: Books.list().map(b => b.id) } });
     } catch (e) { /* offline: keep working locally */ }
-    if (isOwner()) syncLibrary().catch(() => { });
+    syncLibrary().catch(() => { });
+    let libAt = Date.now();                    // a book made available while the app stays open arrives on the next return to it
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - libAt > 600000) { libAt = Date.now(); syncLibrary().catch(() => { }); } });
     Push.token(acct && acct.token); Push.refresh();
     setTimeout(() => Push.state().then(st => {
       if ((st === 'off' || st === 'install') && !localStorage.getItem('ts.pushAsk') && !document.body.classList.contains('exam-locked') && !document.body.classList.contains('playing') && !document.body.classList.contains('exam-mode')) {
@@ -179,21 +181,25 @@
     document.addEventListener('visibilitychange', () => { if (!document.hidden) pollInbox(); });
   }
 
-  /* owner: books on the server appear on every device he logs into (download once); hidden books leave the shelf */
+  /* books on the server: the owner's on every device he logs into, other accounts' only those the owner made available (download once).
+     A server copy that is hidden or withdrawn leaves the shelf; progress stays. A pack the user added by hand is never touched. */
   async function syncLibrary(force) {
     const { books } = await api('/books');
-    const changed = [];
+    const changed = [], listed = new Set(books.map(b => b.id));
+    for (const b of Books.list()) if (b.rec && b.rec.server && b.rec.uid === acct.id && !listed.has(b.id)) { await Books.remove(b.id); changed.push(b.id); }
     for (const sb of books) {
       const local = Books.get(sb.id);
       if (!sb.visible) { if (local && local.rec && local.rec.server) { await Books.remove(sb.id); changed.push(sb.id); } continue; }
       if (local && local.rec && (!local.rec.server || local.rec.updated >= sb.updated) && !force) continue;
       if (local && !local.rec) continue;
-      const busy = App.toast(`☁️ Downloading ${esc(sb.meta.short || sb.id)} from your library…`, 60000);
-      const res = await api(`/books/${sb.id}/pack`, { raw: true });
-      const blob = await res.blob();
-      const file = new File([blob], sb.meta.file || (sb.id + '.tspack'));
-      const r = await Books.load(file, { server: true, uid: acct.id, updated: sb.updated });
-      Store.indexBook(r.book); changed.push(sb.id);
+      const busy = App.toast(`☁️ Downloading ${esc(sb.meta.short || sb.id)}…`, 60000);
+      try {
+        const res = await api(`/books/${sb.id}/pack`, { raw: true });
+        const blob = await res.blob();
+        const file = new File([blob], sb.meta.file || (sb.id + '.tspack'));
+        const r = await Books.load(file, { server: true, uid: acct.id, updated: sb.updated });
+        Store.indexBook(r.book); changed.push(sb.id);
+      } catch (e) { console.warn('Could not download book', sb.id, e); }     // one failed book must not stop the others; retried next time
       if (busy && busy.remove) busy.remove();
     }
     if (changed.length) { Store.syncBooks(); App.toast(`📚 Library updated: ${changed.length} book${changed.length > 1 ? 's' : ''}`); App.render(); api('/me', { body: { books: Books.list().map(b => b.id) } }).catch(() => { }); }
@@ -302,14 +308,23 @@
   function libraryHTML() {
     if (!isOwner()) return '';
     return `<section class="card" id="libCard"><h2>☁️ Your private library</h2>
-      <p class="muted small">Your book packs are stored on your server and appear only in <b>your</b> account, on every device you log into. Turn a book off to remove it from your shelf — your progress in it is kept and comes back when you turn it on again.</p>
+      <p class="muted small"><b>My shelf</b> shows a book on your own devices. <b>Available to users</b> gives it to every other account the next time they open the app. Turning that off takes it back off their shelves; their progress is kept and returns if you turn it on again.</p>
       <div id="libList" class="muted small">Loading…</div></section>`;
   }
   async function bindLibrary() {
     const el = $('#libList'); if (!el) return;
     try {
       const { books } = await api('/books');
-      el.innerHTML = books.map(b => `<label class="switch-row"><span>${esc(b.meta.icon || '📘')} <b>${esc(b.meta.short || b.id)}</b> <small class="muted">${(b.size / 1048576).toFixed(1)} MB · ${(b.meta.counts && b.meta.counts.q || 0).toLocaleString()} questions</small></span><input type="checkbox" data-vis="${b.id}" ${b.visible ? 'checked' : ''}><i class="switch"></i></label>`).join('') || 'No books on the server yet.';
+      const size = b => { const c = b.meta.counts || {}; return `${(b.size / 1048576).toFixed(1)} MB · ${c.q ? c.q.toLocaleString() + ' questions' : (c.steps || 0).toLocaleString() + ' steps'}`; };
+      el.innerHTML = books.map(b => `<div class="lib-book"><div>${esc(b.meta.icon || '📘')} <b>${esc(b.meta.short || b.id)}</b> <small class="muted">${size(b)}</small></div>
+        <label class="switch-row"><span>My shelf</span><input type="checkbox" data-vis="${b.id}" ${b.visible ? 'checked' : ''}><i class="switch"></i></label>
+        <label class="switch-row"><span>Available to users</span><input type="checkbox" data-share="${b.id}" ${b.shared ? 'checked' : ''}><i class="switch"></i></label></div>`).join('') || 'No books on the server yet.';
+      $$('[data-share]', el).forEach(i => i.onchange = async () => {
+        i.disabled = true;
+        try { await api(`/books/${i.dataset.share}/shared`, { body: { shared: i.checked } }); App.toast(i.checked ? '📚 Available to your users' : '🔒 No longer available to your users'); }
+        catch (e) { App.toast('⚠️ ' + esc(e.message)); i.checked = !i.checked; }
+        i.disabled = false;
+      });
       $$('[data-vis]', el).forEach(i => i.onchange = async () => {
         i.disabled = true;
         try { await api(`/books/${i.dataset.vis}/visible`, { body: { visible: i.checked } }); await syncLibrary(); App.toast(i.checked ? '📚 Book shown on your shelf' : '🙈 Book hidden — progress kept'); }

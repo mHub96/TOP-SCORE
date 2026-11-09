@@ -1048,3 +1048,6 @@ iframe.ds-video { border: 0; }
 .ds-tally div { display: flex; justify-content: space-between; align-items: center; }
 .ds-go { display: block; color: var(--ink); margin-top: 12px; }
 .ds-hh { margin: 14px 4px 8px; font-size: 1rem; }
+.lib-book { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.lib-book:last-child { border-bottom: 0; }
+.lib-book .switch-row { padding: 8px 0; border-bottom: 0; }
