@@ -1048,6 +1048,12 @@ iframe.ds-video { border: 0; }
 .ds-tally div { display: flex; justify-content: space-between; align-items: center; }
 .ds-go { display: block; color: var(--ink); margin-top: 12px; }
 .ds-hh { margin: 14px 4px 8px; font-size: 1rem; }
-.lib-book { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.lib-card summary { cursor: pointer; }
+.lib-book { display: grid; grid-template-columns: minmax(0, 1fr) 62px 62px; align-items: center; gap: 6px; padding: 7px 0; border-bottom: 1px solid var(--line); }
 .lib-book:last-child { border-bottom: 0; }
-.lib-book .switch-row { padding: 8px 0; border-bottom: 0; }
+.lib-head { font-size: .72rem; color: var(--muted); text-align: center; padding: 8px 0 4px; }
+.lib-name { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--ink); line-height: 1.25; }
+.lib-name > div { min-width: 0; }
+.lib-name b, .lib-name small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-name b { font-size: .92rem; }
+.lib-book .switch-row { padding: 0; border-bottom: 0; justify-content: center; }

@@ -351,18 +351,20 @@
   /* owner: library card (visibility of each book on the server) */
   function libraryHTML() {
     if (!isOwner()) return '';
-    return `<section class="card" id="libCard"><h2>☁️ Your private library</h2>
+    return `<details class="card lib-card" id="libCard"><summary><b>☁️ Your private library</b> <small class="muted" id="libSum"></small></summary>
       <p class="muted small"><b>My shelf</b> shows a book on your own devices. <b>Everyone</b> gives it to every other account. To give books to particular people, open the <b>Owner panel</b> and press <b>📚 Books</b> on that account. Turning access off removes the book from that person's device the next time they open the app; their progress is kept.</p>
-      <div id="libList" class="muted small">Loading…</div></section>`;
+      <div id="libList" class="muted small">Loading…</div></details>`;
   }
   async function bindLibrary() {
     const el = $('#libList'); if (!el) return;
     try {
       const { books } = await api('/books');
       const size = bookLine;
-      el.innerHTML = books.map(b => `<div class="lib-book"><div>${esc(b.meta.icon || '📘')} <b>${esc(b.meta.short || b.id)}</b> <small class="muted">${size(b)}</small></div>
-        <label class="switch-row"><span>My shelf</span><input type="checkbox" data-vis="${b.id}" ${b.visible ? 'checked' : ''}><i class="switch"></i></label>
-        <label class="switch-row"><span>Everyone</span><input type="checkbox" data-share="${b.id}" ${b.shared ? 'checked' : ''}><i class="switch"></i></label></div>`).join('') || 'No books on the server yet.';
+      el.innerHTML = books.length ? `<div class="lib-book lib-head"><span></span><span>My shelf</span><span>Everyone</span></div>` + books.map(b => `<div class="lib-book"><div class="lib-name"><span>${esc(b.meta.icon || '📘')}</span><div><b>${esc(b.meta.short || b.id)}</b><small class="muted">${size(b)}</small></div></div>
+        <label class="switch-row" aria-label="My shelf"><input type="checkbox" data-vis="${b.id}" ${b.visible ? 'checked' : ''}><i class="switch"></i></label>
+        <label class="switch-row" aria-label="Everyone"><input type="checkbox" data-share="${b.id}" ${b.shared ? 'checked' : ''}><i class="switch"></i></label></div>`).join('') : 'No books on the server yet.';
+      const sum = () => { $('#libSum').textContent = `· ${books.length} book${books.length === 1 ? '' : 's'}, ${$$('[data-share]:checked', el).length} for everyone`; };
+      sum(); el.addEventListener('change', sum);
       $$('[data-share]', el).forEach(i => i.onchange = async () => {
         i.disabled = true;
         try { await api(`/books/${i.dataset.share}/shared`, { body: { shared: i.checked } }); App.toast(i.checked ? '📚 Available to everyone' : '🔒 No longer available to everyone'); }
